@@ -274,6 +274,45 @@ pub fn write_relay_list(path: &Path, relays: &[&RelayProcess]) {
     list.save(path).unwrap();
 }
 
+/// Like [`write_relay_list`], but the list also carries M7 directory
+/// attestations from each of the given directory signing keys.
+pub fn write_attested_relay_list(
+    path: &Path,
+    relays: &[&RelayProcess],
+    dir_sks: &[ed25519_dalek::SigningKey],
+) {
+    let claims: Vec<unlink::directory::RelayClaim> =
+        relays.iter().map(|r| r.claim.clone()).collect();
+    let mut list = unlink::directory::SignedRelayList::from_claims(claims);
+    for sk in dir_sks {
+        list.attestations.push(list.sign_attestation(sk));
+    }
+    list.save(path).unwrap();
+}
+
+/// Like [`write_config`], but with an M7 `[directory]` policy: `dir_keys`
+/// are the hex-encoded ed25519 pubkeys of the N directory signers, and
+/// `threshold` is K. With these set, the client refuses any relay list not
+/// attested by at least K of the keys.
+pub fn write_config_with_directory(
+    path: &Path,
+    relays: (&str, &str, &str),
+    peers: &[(&str, &str, &str, &str)], // (label, addr, id, otk)
+    dir_keys: &[String],
+    threshold: usize,
+) {
+    write_config(path, relays, peers);
+    let mut s = std::fs::read_to_string(path).unwrap();
+    s.push_str(&format!(
+        "\n[directory]\nthreshold = {threshold}\nkeys = [\n"
+    ));
+    for k in dir_keys {
+        s.push_str(&format!("  \"{k}\",\n"));
+    }
+    s.push_str("]\n");
+    std::fs::write(path, s).unwrap();
+}
+
 /// Run `unlink send <peer> <msg> --home <home> --config <config>`.
 pub fn run_send(home: &Path, config: &Path, peer: &str, msg: &str) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_unlink"))

@@ -61,7 +61,10 @@ enum Command {
         #[arg(long)]
         relays: Option<PathBuf>,
     },
-    /// Assemble a signed relay list from live relays (first-use bootstrap)
+    /// Assemble a signed relay list from live relays (first-use bootstrap).
+    /// With `--dir-key`, the listed keys additionally attest the list (M7
+    /// K-of-N directory): the client accepts it only if ≥K of its configured
+    /// directory keys did.
     DirectoryFetch {
         /// Relay addresses to query, e.g. 127.0.0.1:7001
         relays: Vec<String>,
@@ -70,6 +73,10 @@ enum Command {
         out: Option<PathBuf>,
         #[arg(long)]
         home: Option<PathBuf>,
+        /// ed25519 directory signing keys (files of 32 raw bytes); repeat to
+        /// attest with several of the N keys
+        #[arg(long = "dir-key")]
+        dir_keys: Vec<PathBuf>,
     },
     /// Print this client's Layer-3 Double Ratchet keys to share with a peer
     RatchetInit {
@@ -160,15 +167,36 @@ fn run(cmd: Command) -> anyhow::Result<String> {
             )
         }
 
-        Command::DirectoryFetch { relays, out, home } => {
+        Command::DirectoryFetch {
+            relays,
+            out,
+            home,
+            dir_keys,
+        } => {
             let home = home.unwrap_or_else(config::unlink_home);
             let out = out.unwrap_or_else(|| client::relays_path(&home));
             let addrs: Vec<&str> = relays.iter().map(String::as_str).collect();
-            let list = unlink::directory::fetch_claims_from(&addrs)?;
+            let mut list = unlink::directory::fetch_claims_from(&addrs)?;
+            // M7: each --dir-key attests the assembled list with one of the N
+            // directory keys. The client enforces the K-of-N threshold.
+            for path in &dir_keys {
+                let raw = std::fs::read(path).map_err(|e| {
+                    anyhow::anyhow!("cannot read directory key `{}`: {e}", path.display())
+                })?;
+                let bytes: [u8; 32] = raw.as_slice().try_into().map_err(|_| {
+                    anyhow::anyhow!(
+                        "directory key `{}` must contain exactly 32 raw bytes",
+                        path.display()
+                    )
+                })?;
+                let sk = ed25519_dalek::SigningKey::from_bytes(&bytes);
+                list.attestations.push(list.sign_attestation(&sk));
+            }
             list.save(&out)?;
             Ok(format!(
-                "verified {} relay claim(s) → {}",
+                "verified {} relay claim(s) with {} directory attestation(s) → {}",
                 list.entries.len(),
+                list.attestations.len(),
                 out.display()
             ))
         }

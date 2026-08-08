@@ -15,9 +15,10 @@ and `docs/THREAT_MODEL.md` are the precise references.*
 | **M4 — measurements + writeup** | Latency measured at 3 config points (`delay_ms` 0/25/50); anonymity-set and spam-resistance analysis written without overclaiming; per-hop-delay tradeoff documented. | `tests/latency_measure.rs` (ignored harness); `docs/LATENCY.md`, `docs/ANONYMITY_ANALYSIS.md`, `docs/SPAM_RESISTANCE.md` |
 | **M5 — timing mixing** | **Exponential (Poisson) per-hop delay** (each hop's delay sampled from Exp(mean `delay_ms`); shape pinned deterministically) and **constant-rate Poisson cover traffic** (relays emit dummy Sphinx packets, routed like real packets, dropped at the exit; byte-size-indistinguishable). Both verified on the real path, including that cover bypasses the M2 admission gate without touching it. | `mix::tests` (deterministic distribution shape + constant-size Sphinx); `tests/m6_mixing.rs` (wire-varied delays; cover/admission interaction); `tests/m1_routing.rs` (Poisson-safe enforcement test); `tests/latency_measure.rs` (4 config points incl. cover); `docs/LATENCY.md`, `docs/ANONYMITY_ANALYSIS.md` (M5 updates) |
 | **M6 — bootstrap** | **Proof-of-work token-batch bootstrap** (spec §4/§9): the issuer's eligibility policy is no longer a stub — a per-request challenge bound to `(nonce, client_id, epoch)` must be mined (`--pow-bits`, default 26) before **one batch per (client, epoch)** is granted. Tunable; honest bound verified (linear M×2^bits cost vs. 0 with the gate off; legit user 36 563 hashes / 0.26 s at bits=18). | `pow::tests` (deterministic shape/binding); `credential::tests` (enforcement, misbinding, single-use challenges); `tests/m7_bootstrap.rs` (measured linear attacker scaling + legit-user usability); `tests/cli_smoke.rs` (mine-then-grant CLI path); `docs/THREAT_MODEL.md` §3.2/§3.7/§6, `docs/SPAM_RESISTANCE.md` §3.1, `docs/LIBRARY_SELECTION.md` §7 |
+| **M7 — directory K-of-N** | The relay list's trust root is no longer a single key: **N independent directory keys (default 3), K-of-N threshold (default 2)**. A client accepts a list only when ≥K of its configured keys attest it (`[directory] keys` + `threshold`; `--dir-key` on `unlink directory-fetch`); attestation is **strict** — a forged/unconfigured key rejects the list even alongside K valid ones. Removes the single-directory-key assumption; still a fixed small N (gossip/DHT explicitly out of scope). | `directory::tests` (`k_of_n_threshold_enforced`, `forged_or_mismatched_attestation_rejects_even_with_k_valid`, `attestations_bind_to_the_entries`); `config::tests` (policy parse/defaults); `tests/m8_directory.rs` (1-of-3 refused pre-network, 2-of-3 routes a real message, forged rejected alongside 2 valid); `docs/THREAT_MODEL.md` §1/§2.E/§6 |
 
-**Test suite:** 67 tests passing (+1 `#[ignore]`d latency harness);
-`cargo clippy --all-targets -- -D warnings` clean; `cargo fmt` clean.
+**Test suite:** 74 tests passing (+1 `#[ignore]`d latency harness);
+`cargo clippy --all-targets -- -D warnings` clean; `cargo fmt` clean (as of the M7 checkpoint).
 
 ## 2. Named follow-ups (per `docs/THREAT_MODEL.md` §3.1, §3.2, §6)
 
@@ -28,10 +29,11 @@ These are explicitly flagged future work, not silently absent:
   (see the M5 row above and `docs/LATENCY.md`/`docs/ANONYMITY_ANALYSIS.md`).
   Remaining timing-mixing refinement: full per-mix queue shaping / loop
   messages (the rest of Loopix's mechanism). **M5+**.
-- **Full gossip propagation / separate directory authority** — the signed
-  list mechanics are real; propagation (exchanging lists, a DHT) and an
-  out-of-band directory/pubkey that vouches for relay identity keys are
-  **M5+** (per spec §5.4's own "full DHT is a stretch goal").
+- ~~**Separate directory authority**~~ — **built in M7** as a **K-of-N
+  multi-signer directory** (N keys, threshold K; see the M7 row). What
+  remains is real **gossip propagation** (exchanging lists, a DHT) and
+  per-operator path caps — **explicitly out of scope for this project**
+  (hackathon scope), per `docs/THREAT_MODEL.md` §6, not a future TODO.
 - ~~**Token-batch bootstrap**~~ — **built in M6** as per-batch proof of
   work (`src/pow.rs`), replacing the M2 one-batch-per-client stub; see the
   M6 row and `docs/SPAM_RESISTANCE.md` §3.1 for the honest bound (a cost
@@ -46,7 +48,7 @@ These are explicitly flagged future work, not silently absent:
   fixed per-hop delay is a partial, deterministic mitigation only, and the
   writeups say so.
 
-## 3. Out of MVP scope per spec §5 (not built, deliberately)
+## 3. Out of MVP scope (not built, deliberately — no expansion proposed)
 
 - **Group messaging** (Olm is pairwise; Megolm/MLS would be required).
 - **Mobile clients** (CLI/desktop only; plain TCP framing).
@@ -55,6 +57,11 @@ These are explicitly flagged future work, not silently absent:
 - **Global-deployment concerns**: real network RTTs, multi-machine
   distribution, operator reputation systems, and TLS at the edges are all
   beyond the current loopback MVP.
+- **Named out of scope for this project** (hackathon scope): memory-hard
+  PoW hardening, zk-SNARK budget, full gossip/DHT, per-operator path caps,
+  bridge relays, jurisdictional diversity, app distribution, loop
+  messages. They strengthen banked wins, not the claim being made, and are
+  not pursued.
 
 ## 4. How to reproduce the claims
 

@@ -29,6 +29,62 @@ pub struct Config {
     pub relays: Relays,
     #[serde(default)]
     pub peers: std::collections::HashMap<String, Peer>,
+    /// M7 K-of-N directory trust policy. Empty keys = no policy (M3 TOFU
+    /// mode); with keys set, a relay list is only accepted if attested by at
+    /// least `threshold` of them.
+    #[serde(default)]
+    pub directory: Directory,
+}
+
+/// The client's directory trust policy (M7): N independent directory public
+/// keys and the K threshold. See `directory::SignedRelayList::verify_directory`
+/// for the enforcement semantics and `docs/THREAT_MODEL.md` §1 for the trust
+/// note (fixed small N, not decentralized gossip/DHT).
+#[derive(Debug, Clone, Deserialize)]
+pub struct Directory {
+    /// Hex-encoded ed25519 public keys of the N directory signers.
+    #[serde(default)]
+    pub keys: Vec<String>,
+    /// Minimum number of distinct configured keys that must attest a relay
+    /// list (K-of-N). Defaults to 2.
+    #[serde(default = "default_dir_threshold")]
+    pub threshold: usize,
+}
+
+fn default_dir_threshold() -> usize {
+    crate::directory::DEFAULT_DIR_THRESHOLD
+}
+
+impl Default for Directory {
+    /// Unconfigured policy: no keys, but the threshold still defaults to K
+    /// (2) so a later `[directory]` section that sets keys only has to set
+    /// the threshold explicitly if it wants something other than K=2.
+    fn default() -> Self {
+        Self {
+            keys: Vec::new(),
+            threshold: crate::directory::DEFAULT_DIR_THRESHOLD,
+        }
+    }
+}
+
+impl Directory {
+    pub fn is_configured(&self) -> bool {
+        !self.keys.is_empty()
+    }
+
+    /// Decode the configured hex pubkeys into raw 32-byte ed25519 keys.
+    pub fn parsed_keys(&self) -> Result<Vec<[u8; 32]>> {
+        self.keys
+            .iter()
+            .map(|k| {
+                let bytes = hex::decode(k)
+                    .map_err(|e| anyhow::anyhow!("bad directory key hex `{k}`: {e}"))?;
+                bytes
+                    .try_into()
+                    .map_err(|_| anyhow::anyhow!("directory key `{k}` must decode to 32 bytes"))
+            })
+            .collect()
+    }
 }
 
 /// Default **mean** per-hop mix delay in milliseconds (spec §3.2's
@@ -147,5 +203,48 @@ delay_ms = 250
 "#;
         let cfg: Config = toml::from_str(raw).unwrap();
         assert_eq!(cfg.relays.delay_ms, 250);
+    }
+
+    #[test]
+    fn directory_policy_parses_and_defaults() {
+        // No [directory] section → unconfigured TOFU mode (backward compat).
+        let raw = r#"
+[relays]
+entry = "127.0.0.1:7001"
+middle = "127.0.0.1:7002"
+exit = "127.0.0.1:7003"
+"#;
+        let cfg: Config = toml::from_str(raw).unwrap();
+        assert!(!cfg.directory.is_configured());
+        assert_eq!(cfg.directory.threshold, 2, "threshold defaults to 2");
+
+        // Configured with 3 keys + threshold 2 (M7).
+        let raw = r#"
+[relays]
+entry = "127.0.0.1:7001"
+middle = "127.0.0.1:7002"
+exit = "127.0.0.1:7003"
+
+[directory]
+threshold = 2
+keys = [
+  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+]
+"#;
+        let cfg: Config = toml::from_str(raw).unwrap();
+        assert!(cfg.directory.is_configured());
+        let parsed = cfg.directory.parsed_keys().unwrap();
+        assert_eq!(parsed.len(), 3);
+        assert_eq!(cfg.directory.threshold, 2);
+
+        // Bad hex / wrong length keys are rejected at parse time.
+        let mut bad = cfg.clone();
+        bad.directory.keys[0] = "zz".into();
+        assert!(bad.directory.parsed_keys().is_err());
+        let mut short = cfg.clone();
+        short.directory.keys[1] = "aa".into();
+        assert!(short.directory.parsed_keys().is_err());
     }
 }

@@ -2,7 +2,7 @@
 
 A minimal CLI client for a mixnet-routed messenger.
 
-**Current milestone: M6.** Real 3-hop Sphinx routing over local TCP with
+**Current milestone: M7.** Real 3-hop Sphinx routing over local TCP with
 **enforced per-hop mix delay** (M1; since M5 **exponential/Poisson** — each
 hop's delay is sampled from Exp(mean `delay_ms`)), **constant-rate Poisson
 cover traffic** (M5: relays emit dummy Sphinx packets, routed like real
@@ -11,14 +11,19 @@ the token gate), reputation-gated admission with blind-signature tokens
 (M2), **proof-of-work token-batch bootstrap** (M6: the issuer grants one
 batch per (client, epoch) only after a tunable PoW solve, `--pow-bits` —
 the spec §4/§9 answer to who deserves a batch), a signed relay/gossip list
-verified by the client (M3), Layer-3 message-body encryption with the Olm
-Double Ratchet (M3, via `vodozemac`), and the M4–M6 measurements +
+verified by the client (M3) with a **K-of-N multi-signer directory** (M7:
+N independent directory keys, default 3, and a client-side threshold K,
+default 2 — a list is accepted only when ≥K of them attest it, so no
+single key can steer routing), Layer-3 message-body encryption with the
+Olm Double Ratchet (M3, via `vodozemac`), and the M4–M6 measurements +
 writeup (`docs/LATENCY.md`, `docs/ANONYMITY_ANALYSIS.md`,
 `docs/SPAM_RESISTANCE.md`, `docs/M4_SUMMARY.md`) are done. Still out of
-scope: real gossip *propagation* (M5+), a separate directory authority,
-full per-mix queue shaping / loop messages, transport obfuscation,
-memory-hard PoW / reputation bootstrap (the M6 PoW is an honest cost
-floor, not a Sybil wall — see `docs/SPAM_RESISTANCE.md` §3.1).
+scope: real gossip/DHT *propagation* and per-operator path caps (the
+K-of-N directory is deliberately a fixed small N — see
+`docs/THREAT_MODEL.md` §6), full per-mix queue shaping / loop messages,
+transport obfuscation, memory-hard PoW / reputation bootstrap (the M6 PoW
+is an honest cost floor, not a Sybil wall — `docs/SPAM_RESISTANCE.md`
+§3.1).
 
 ## Why Rust
 
@@ -81,13 +86,19 @@ where `<n>` matches the epoch used by `token-issue`.
 `unlink directory-fetch` once per relay set, and re-run it if a relay
 rotates its keys.
 
+K-of-N directory (M7): with a `[directory]` section in `config.toml`
+(`keys = ["<hex ed25519 pubkey>", …]`, `threshold = 2`), `send` also
+refuses any list not attested by at least `threshold` of the `keys`. Attest
+a list at fetch time with `unlink directory-fetch … --dir-key
+<32-byte-key-file>`, once per directory key.
+
 ## CLI
 
 | Command                              | Status |
 |--------------------------------------|--------|
 | `unlink keygen`                      | x25519 identity keypair (0600 file) |
 | `unlink token-issue [--count N] [--pow-bits B] [--client-id ID]` | issue a blind-token batch, PoW-gated (M2+M6) |
-| `unlink directory-fetch <addr>...`   | assemble a verified signed relay list from live relays (M3) |
+| `unlink directory-fetch <addr>... [--dir-key <file>]...` | assemble a verified signed relay list from live relays; each `--dir-key` attests it with one of the N directory keys (M3 + M7) |
 | `unlink send <peer> <msg>`           | ratchet-encrypt the body, spend one token, build a 3-hop Sphinx packet, verify signed list + handshake claims, send via entry relay |
 | `unlink relay --start --port P`      | mix relay: unwrap-and-forward over TCP; `--admit-key`/`--epoch` enable the M2 gate; `--cover-rate N --network e,m,x` enable Poisson cover traffic (M5) |
 | `unlink ratchet-init [--home]`       | create Layer-3 Olm account; print identity + one-time key to share with a peer (M3) |
@@ -108,7 +119,7 @@ src/
   relay.rs      # unwrap-and-forward loop + admission gate + signed identity claim + cover emitter
   mix.rs        # M5 timing mixing: exponential per-hop delay + Poisson cover scheduling
   pow.rs        # M6 proof-of-work: challenge binding, mining, verification (SHA-256)
-  directory.rs  # signed relay claims + gossip list verify (M3)
+  directory.rs  # signed relay claims + gossip list verify (M3) + K-of-N directory attestations (M7)
   credential.rs # blind-signature tokens: issuer / wallet / relay admission + PoW-gated bootstrap
   net.rs        # plain-TCP framing (transport obfuscation is M-later)
   config.rs     # client TOML config (relay path + peers, incl. Layer-3 keys)
@@ -121,6 +132,7 @@ tests/
   m5_load.rs          # concurrent token abuse: relay stays responsive, drops correct
   m6_mixing.rs        # Poisson delay on the wire + cover traffic vs. the admission gate (M5)
   m7_bootstrap.rs     # PoW bootstrap: enforcement, linear attacker scaling, legit-user usability (M6)
+  m8_directory.rs     # K-of-N directory: 1-of-3 refused, 2-of-3 routes, forged rejected (M7)
 docs/
   LIBRARY_SELECTION.md    # sphinx-packet (§1) + blind-rsa-signatures (§2) + ed25519 (§4) + vodozemac (§5) + timing mixing (§6) + PoW (§7)
   THREAT_MODEL.md         # adversary model, credential guarantees, MVP non-goals

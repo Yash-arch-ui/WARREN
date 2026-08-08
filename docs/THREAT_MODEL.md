@@ -13,14 +13,27 @@ an entry here.
 
 ## 1. Trust roots and assumed environment
 
-- The **directory** is a trusted (but auditable) root: it is *not* a mix
-  relay and never sees message traffic. Its public key is pinned in the
-  client (out-of-band). It signs the relay list. *(Stub — M-later.)* In M3
-  the *list mechanics* are real: every relay self-signs its metadata with a
-  long-term ed25519 key and clients verify a signed gossip list (see §2.E
-  and §8.5). What is still missing is a *separate directory entity* that
-  aggregates and vouches for relay identity keys — first-use trust is
-  currently TOFU from the live relays themselves (see §2.E caveats).
+- The **directory** is a trust root for *routing integrity only*: it is
+  *not* a mix relay and never sees message traffic. Since M7 it is **not a
+  single key** — it is **N independent signing keys (default N=3) with a
+  K-of-N threshold (default K=2)**. The client pins the N public keys in
+  its config (`[directory]`) and accepts a relay list only if it carries
+  **valid attestations from at least K of them** (`directory::
+  SignedRelayList::verify_directory`, enforced in `client::send`; strict —
+  a forged/unconfigured attestation rejects the list even alongside K
+  valid ones). Below the attestation layer, the *list mechanics* are M3:
+  every relay self-signs its metadata with a long-term ed25519 key and
+  clients verify the signed list and cross-check live handshake claims
+  (spec §8.5; §2.E).
+
+  **What M7 removes and what it does not:** the single-directory-key trust
+  assumption (the "one operator controls routing integrity" critique) is
+  gone — no one key alone can steer clients' paths; compromising ≥K keys
+  (or all N) still can. It is deliberately still a **fixed, small N** —
+  real decentralized gossip/DHT (spec §5.4's stretch goal) is **explicitly
+  out of scope for this project**, not a future TODO (§6). First-use trust
+  (assembling the first list, choosing the N keys) remains an out-of-band
+  bootstrap step.
 - The **issuer** (M2) is a trusted root for *admission only*: it signs blind
   tokens, never sees message traffic, and cannot link a redemption back to
   an issuance (see §4). A compromised issuer can mint tokens (a spam vector)
@@ -134,10 +147,15 @@ entry was produced by whoever holds that identity key — it does not by
 itself prove the key belongs to the *real* relay at that address. The
 client's protection is that it pins identity keys via the list (assembled
 once, e.g. via `unlink directory-fetch` against relays it already trusts)
-and thereafter rejects any relay whose live claim does not match. A
-**separate directory authority** that vouches for identity keys
-out-of-band, and real gossip **propagation** (exchanging lists between
-clients / a DHT), are M5+ — see §6.
+and thereafter rejects any relay whose live claim does not match.
+
+**M7 attestation layer:** the N directory keys additionally vouch for the
+*set* of identity keys — a relay list carries ≥K valid directory
+attestations before a client will use it (`--dir-key` on
+`unlink directory-fetch`; the client's `[directory] keys` + `threshold`).
+An attacker would need ≥K directory keys (not one) to steer clients.
+Real gossip **propagation** (exchanging lists between clients / a DHT) is
+**explicitly out of scope for this project** — see §6.
 
 ## 3. Explicitly NOT defended against in MVP scope
 
@@ -310,14 +328,15 @@ We use `blind-rsa-signatures` (RFC 9474 / Privacy Pass v1) — see
 ## 6. Open items
 
 - Reconcile against the full spec (esp. §9 timing, §3.2 admission position).
-- Real directory authority + constrained random path selection (per-operator
-  caps). The signed-list *mechanics* are M3 (self-signed relay claims,
-  client-side list verification, handshake cross-check — §2.E); what
-  remains is the **trust bootstrap**: an out-of-band directory/pubkey that
-  vouches for relay identity keys, and **gossip propagation** (exchanging
-  lists between clients, a DHT) — per spec §5.4's own "full DHT is a
-  stretch goal", propagation is deliberately **M5+ future work**, flagged
-  here rather than silently dropped.
+- ~~Real directory authority~~ — **BUILT (M7) as a K-of-N multi-signer
+  directory**: N independent keys (default 3), client requires ≥K valid
+  attestations (default 2), verified in `tests/m8_directory.rs` and
+  `directory::tests`. Constrained random path selection (per-operator
+  caps) and real **gossip propagation** (exchanging lists, a DHT — spec
+  §5.4's own stretch goal) are **explicitly out of scope for this
+  project** (hackathon scope), not future TODOs; the signed-list mechanics
+  (self-signed relay claims, client-side verification, handshake
+  cross-check — §2.E) remain the foundation they would build on.
 - **Token-batch bootstrap is BUILT (M6, spec §4/§9)** — per-batch proof of
   work (`src/pow.rs`), tunable via `--pow-bits`, one batch per
   (client, epoch), with the honest linear-hashrate bound of §3.2 verified in

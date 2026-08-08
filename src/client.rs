@@ -12,7 +12,9 @@
 //!   decrypts each message with the Layer-3 ratchet before printing.
 //!
 //! Trust order in `send`: message validation → config/peer lookup → signed
-//! relay list → path verification → **encryption** → token spend → transmit.
+//! relay list → **M7 directory policy** (K-of-N attestations when
+//! configured) → path verification → **encryption** → token spend →
+//! transmit.
 //! Everything before the token spend is a *refusal* path that must not burn
 //! an admission token (spec §8.5), and encryption is one of those refusals.
 //! (The token is spent *before* the network transmit, so a transport failure
@@ -97,6 +99,9 @@ pub fn send(
     // entry must carry a valid self-signature, or the send is refused.
     let list = SignedRelayList::load_and_verify(relays_path)?;
 
+    // M7 K-of-N directory policy (refusal path — before any token spend).
+    verify_directory_policy(&cfg, &list)?;
+
     // Verify the path BEFORE spending a token: a relay substitution, a MITM
     // injecting its own keys, or a stale list must refuse the send without
     // burning an admission token (spec §8.5).
@@ -167,9 +172,27 @@ pub fn send_packet(
         );
     }
 
+    // M7 K-of-N directory policy (refusal path — before any network I/O).
+    verify_directory_policy(cfg, list)?;
+
     let relays = cfg.relays.path();
     let sphinx_keys = resolve_verified_path(&relays, list)?;
     transmit_packet(cfg, receiver, wire, proof, &sphinx_keys)
+}
+
+/// M7 K-of-N directory policy: if the config pins N directory keys, the
+/// relay list must carry **valid** attestations from at least K of them
+/// (strict — any bad or unconfigured attestation rejects; see
+/// `SignedRelayList::verify_directory`). With no keys configured the list is
+/// trusted on self-signatures alone (M3 TOFU mode). This is a refusal path:
+/// it runs before any token spend or network I/O.
+fn verify_directory_policy(cfg: &Config, list: &SignedRelayList) -> Result<()> {
+    if cfg.directory.is_configured() {
+        let keys = cfg.directory.parsed_keys()?;
+        list.verify_directory(&keys, cfg.directory.threshold)
+    } else {
+        Ok(())
+    }
 }
 
 /// Build the 3-hop Sphinx packet with the already-verified sphinx keys and
@@ -462,6 +485,7 @@ mod tests {
                 delay_ms: crate::config::DEFAULT_DELAY_MS,
             },
             peers: Default::default(),
+            directory: Default::default(),
         };
         // The empty-message check runs before any network/list lookup.
         assert!(send_packet(&cfg, &SignedRelayList::default(), "127.0.0.1:1", &[], None).is_err());
