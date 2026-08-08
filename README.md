@@ -2,7 +2,7 @@
 
 A minimal CLI client for a mixnet-routed messenger.
 
-**Current milestone: M7.** Real 3-hop Sphinx routing over local TCP with
+**Current milestone: M8.** Real 3-hop Sphinx routing over local TCP with
 **enforced per-hop mix delay** (M1; since M5 **exponential/Poisson** — each
 hop's delay is sampled from Exp(mean `delay_ms`)), **constant-rate Poisson
 cover traffic** (M5: relays emit dummy Sphinx packets, routed like real
@@ -15,15 +15,18 @@ verified by the client (M3) with a **K-of-N multi-signer directory** (M7:
 N independent directory keys, default 3, and a client-side threshold K,
 default 2 — a list is accepted only when ≥K of them attest it, so no
 single key can steer routing), Layer-3 message-body encryption with the
-Olm Double Ratchet (M3, via `vodozemac`), and the M4–M6 measurements +
-writeup (`docs/LATENCY.md`, `docs/ANONYMITY_ANALYSIS.md`,
+Olm Double Ratchet (M3, via `vodozemac`), **TLS-record-layer wire
+dressing** (M8: every frame rides in a TLS 1.2 application-data record
+shell — defeats naive DPI shape-fingerprinting; not a real TLS session,
+so no claim against active probing), and the M4–M6 measurements + writeup
+(`docs/LATENCY.md`, `docs/ANONYMITY_ANALYSIS.md`,
 `docs/SPAM_RESISTANCE.md`, `docs/M4_SUMMARY.md`) are done. Still out of
 scope: real gossip/DHT *propagation* and per-operator path caps (the
 K-of-N directory is deliberately a fixed small N — see
 `docs/THREAT_MODEL.md` §6), full per-mix queue shaping / loop messages,
-transport obfuscation, memory-hard PoW / reputation bootstrap (the M6 PoW
-is an honest cost floor, not a Sybil wall — `docs/SPAM_RESISTANCE.md`
-§3.1).
+pluggable-transport-grade obfuscation (obfs4-equivalent), memory-hard PoW
+/ reputation bootstrap (the M6 PoW is an honest cost floor, not a Sybil
+wall — `docs/SPAM_RESISTANCE.md` §3.1).
 
 ## Why Rust
 
@@ -121,7 +124,7 @@ src/
   pow.rs        # M6 proof-of-work: challenge binding, mining, verification (SHA-256)
   directory.rs  # signed relay claims + gossip list verify (M3) + K-of-N directory attestations (M7)
   credential.rs # blind-signature tokens: issuer / wallet / relay admission + PoW-gated bootstrap
-  net.rs        # plain-TCP framing (transport obfuscation is M-later)
+  net.rs        # plain-TCP framing with TLS-record-layer wire dressing (M8)
   config.rs     # client TOML config (relay path + peers, incl. Layer-3 keys)
 tests/
   cli_smoke.rs        # CLI-level smoke tests
@@ -158,8 +161,10 @@ code, not assumed); blind tokens gate admission with unlinkable redemptions;
 the Olm Double Ratchet protects message content with forward secrecy and
 break-in recovery (M3); PoW-gated batch bootstrap puts a computational
 cost floor on mass identity-minting (M6 — an honest cost floor, not a
-Sybil wall); **global timing correlation is explicitly NOT solved** (spec
-§9) and remains out of MVP scope.
+Sybil wall); M8 wire dressing raises the cost of naive DPI
+shape-fingerprinting (bounded — record-shaped, not a real TLS session);
+**global timing correlation is explicitly NOT solved** (spec §9) and
+remains out of MVP scope.
 
 ## License
 

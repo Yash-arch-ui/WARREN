@@ -56,10 +56,14 @@ between relays.
 per-hop key derived (via HKDF) from an ephemeral x25519 shared secret.
 Observers see fixed-size, indistinguishable packets and cannot recover
 sender, recipient, payload, or path. TLS on the client→first-relay hop adds
-link protection at the edges.
+link protection at the edges. **M8:** the byte stream itself is dressed in
+TLS 1.2 application-data record framing (`net::wrap_record`), so even its
+*shape* matches ordinary TLS application data rather than a raw custom
+protocol — with the honest bound of §5 (naive-shape resistance only, not
+active probing).
 
 **Architecture mapping:** `client::send` builds the packet (M1);
-`relay` unwraps/forwards (M1).
+`relay` unwraps/forwards (M1); `net.rs` wraps/unwraps every frame (M8).
 
 ### B. Malicious relay (single compromised hop)
 
@@ -324,6 +328,21 @@ We use `blind-rsa-signatures` (RFC 9474 / Privacy Pass v1) — see
   and unambiguous — this is *why* we reuse `sphinx-packet` (0.7.0,
   Apache-2.0) and `blind-rsa-signatures` (0.17.2, MIT) instead of
   hand-rolling crypto (see `docs/LIBRARY_SELECTION.md`).
+- **Wire obfuscation (M8, minimum viable):** every frame is wrapped in a
+  TLS 1.2 application-data record shell (`net::wrap_record`,
+  `[0x17 03 03][u16 len][frame]`, chunked at the 16 KiB TLS plaintext cap)
+  before hitting the wire, so a passive DPI observer sees TLS-shaped bytes
+  instead of the old raw `[u32 len]`-prefixed custom protocol. The exact
+  wire shape is pinned by `net::tests`
+  (`wire_bytes_are_tls_record_shaped`,
+  `raw_tcp_wire_is_tls_record_shaped_and_parses`,
+  `large_frame_spans_tls_records_and_reassembles`). **The honest bound:**
+  this **defeats naive protocol-shape fingerprinting**; it is **not** a
+  real TLS session (there is no handshake — pure application-data records)
+  and does **not** defeat active probing or a sophisticated DPI system
+  doing full protocol validation. Pluggable-transport-grade resistance
+  (obfs4-equivalent) is **explicitly out of scope for this project** (not
+  a TODO).
 
 ## 6. Open items
 
@@ -354,5 +373,7 @@ We use `blind-rsa-signatures` (RFC 9474 / Privacy Pass v1) — see
   (`tests/m6_mixing.rs`), and measured (`docs/LATENCY.md`); see §3.1.
   Remaining timing-mixing refinement: full per-mix queue shaping / loop
   messages (the rest of Loopix's mechanism).
-- SURB-based replies; transport obfuscation. (Double Ratchet content
-  encryption is **done** — M3, §2.D.)
+- ~~Transport obfuscation~~ — **BUILT (M8) at the minimum-viable bar**
+  (TLS-record-layer dressing on all frames; bounded claim in §5).
+  SURB-based anonymous replies remain out of scope. (Double Ratchet
+  content encryption is **done** — M3, §2.D.)
