@@ -56,15 +56,11 @@ $ warren token-issue --count 10
 $ warren ratchet-init --home ~/.warren/bob
 ratchet identity=<bob-id> one_time=<bob-otk>
 
-# Terminal 4: write the config with the relay path and bob's ratchet keys
-$ cat > ~/.warren/config.toml <<'EOF'
-[relays]
-entry     = "127.0.0.1:7001"
-middle    = "127.0.0.1:7002"
-exit      = "127.0.0.1:7003"
-delay_ms  = 10   # MEAN per-hop mix delay (ms, spec §3.2): each hop's delay
-                 # is sampled from an exponential with this mean (Poisson
-                 # mixing, M5); 0 = no delay, tunable per user
+# Terminal 4: write the config with the relay path and bob's ratchet keys.
+# `warren init` writes the [relays] scaffold (localhost path + commented
+# peers/directory blocks) into ~/.warren/config.toml; add bob under [peers]:
+$ warren init
+$ cat >> ~/.warren/config.toml <<'EOF'
 
 [peers.bob]
 addr = "127.0.0.1:9001"   # bob's delivery address
@@ -99,6 +95,7 @@ a list at fetch time with `warren directory-fetch … --dir-key
 
 | Command                              | Status |
 |--------------------------------------|--------|
+| `warren init [--home] [--config] [--force]` | write a default `config.toml` (localhost relay path + commented peers/directory) into the data dir — refuses to clobber an existing config without `--force` |
 | `warren keygen`                      | x25519 identity keypair (0600 file) |
 | `warren token-issue [--count N] [--pow-bits B] [--client-id ID]` | issue a blind-token batch, PoW-gated (M2+M6) |
 | `warren directory-fetch <addr>... [--dir-key <file>]...` | assemble a verified signed relay list from live relays; each `--dir-key` attests it with one of the N directory keys (M3 + M7) |

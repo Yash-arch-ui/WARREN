@@ -37,6 +37,58 @@ fn keygen_writes_identity() {
 }
 
 #[test]
+fn init_writes_valid_default_config() {
+    let home = temp_home("init");
+    let (stdout, stderr, ok) = warren(&["init", "--home", &home.to_string_lossy()]);
+    assert!(ok, "init should succeed; stderr: {stderr}");
+    assert!(
+        stdout.contains("config"),
+        "stdout names the config: {stdout}"
+    );
+    let cfg_path = home.join("config.toml");
+    assert!(cfg_path.exists(), "config.toml written");
+
+    // The generated file must load as a real Config: the localhost relay
+    // path, default delay, and unconfigured peers/directory (TOFU mode).
+    let cfg = warren::config::Config::load(&cfg_path).unwrap();
+    assert_eq!(
+        cfg.relays.path(),
+        ["127.0.0.1:7001", "127.0.0.1:7002", "127.0.0.1:7003"]
+    );
+    assert_eq!(cfg.relays.delay_ms, warren::config::DEFAULT_DELAY_MS);
+    assert!(cfg.peers.is_empty(), "no peers in the default config");
+    assert!(
+        !cfg.directory.is_configured(),
+        "no directory keys → unconfigured TOFU mode"
+    );
+}
+
+#[test]
+fn init_refuses_to_overwrite_without_force() {
+    let home = temp_home("init-overwrite");
+    std::fs::write(home.join("config.toml"), "keep me").unwrap();
+    let (_, stderr, ok) = warren(&["init", "--home", &home.to_string_lossy()]);
+    assert!(!ok, "init without --force must refuse to overwrite");
+    assert!(
+        stderr.contains("exists"),
+        "error names the existing config: {stderr}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(home.join("config.toml")).unwrap(),
+        "keep me",
+        "existing config untouched without --force"
+    );
+
+    let (_, stderr, ok) = warren(&["init", "--home", &home.to_string_lossy(), "--force"]);
+    assert!(ok, "init --force should succeed; stderr: {stderr}");
+    assert_ne!(
+        std::fs::read_to_string(home.join("config.toml")).unwrap(),
+        "keep me",
+        "--force overwrites the config"
+    );
+}
+
+#[test]
 fn token_issue_writes_wallet() {
     let home = temp_home("issue");
     let (stdout, stderr, ok) = warren(&[

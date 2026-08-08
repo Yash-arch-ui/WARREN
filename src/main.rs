@@ -20,6 +20,19 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Write a default config.toml (relay path, commented peers/directory
+    /// policy) into the data dir; the base for local single-machine testing
+    Init {
+        #[arg(long, help = "data dir (default $WARREN_HOME or ~/.warren)")]
+        home: Option<PathBuf>,
+        #[arg(
+            long,
+            help = "write the config to this exact path (default <home>/config.toml)"
+        )]
+        config: Option<PathBuf>,
+        #[arg(long, help = "overwrite an existing config.toml")]
+        force: bool,
+    },
     /// Generate an identity keypair (x25519) in the data dir
     Keygen {
         #[arg(long, help = "data dir (default $WARREN_HOME or ~/.warren)")]
@@ -161,6 +174,26 @@ fn main() -> ExitCode {
 
 fn run(cmd: Command) -> anyhow::Result<String> {
     match cmd {
+        Command::Init {
+            home,
+            config,
+            force,
+        } => {
+            // --config wins; else --home (data dir); else the default path
+            // ($WARREN_CONFIG, or <$WARREN_HOME|~/.warren>/config.toml).
+            let path = match (config, home) {
+                (Some(p), _) => p,
+                (None, Some(h)) => h.join("config.toml"),
+                (None, None) => config::config_path(),
+            };
+            let written = config::init(&path, force)?;
+            Ok(format!(
+                "wrote default config to {} (relay path 127.0.0.1:7001 → 7002 → 7003; \
+                 add contacts under [peers] in the file)",
+                written.display()
+            ))
+        }
+
         Command::Keygen { home } => client::keygen(&home.unwrap_or_else(config::warren_home)),
 
         Command::TokenIssue {
