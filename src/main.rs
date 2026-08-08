@@ -115,6 +115,18 @@ enum Command {
         start: bool,
         #[arg(long, default_value_t = 7001, help = "listen port (0 = ephemeral)")]
         port: u16,
+        #[arg(
+            long,
+            default_value = "127.0.0.1",
+            help = "interface to bind (use 0.0.0.0 for a publicly reachable relay)"
+        )]
+        bind: String,
+        #[arg(
+            long,
+            help = "public host:port to sign into the claim (default: the bound address; \
+                     required when binding 0.0.0.0 so clients can look the relay up)"
+        )]
+        advertise: Option<String>,
         #[arg(long, help = "relay x25519 key file (auto-generated if missing)")]
         key: Option<PathBuf>,
         #[arg(long, help = "issuer public key (PEM); enables M2 admission gate")]
@@ -255,6 +267,8 @@ fn run(cmd: Command) -> anyhow::Result<String> {
         Command::Relay {
             start,
             port,
+            bind,
+            advertise,
             key,
             admit_key,
             epoch,
@@ -304,7 +318,14 @@ fn run(cmd: Command) -> anyhow::Result<String> {
                 }
                 _ => None,
             };
-            relay::start(port, key.as_deref(), admission, cover)?;
+            relay::start(
+                &bind,
+                port,
+                advertise.as_deref(),
+                key.as_deref(),
+                admission,
+                cover,
+            )?;
             Ok("relay stopped".into())
         }
     }

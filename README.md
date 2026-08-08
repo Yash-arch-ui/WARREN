@@ -103,7 +103,7 @@ a list at fetch time with `warren directory-fetch … --dir-key
 | `warren token-issue [--count N] [--pow-bits B] [--client-id ID]` | issue a blind-token batch, PoW-gated (M2+M6) |
 | `warren directory-fetch <addr>... [--dir-key <file>]...` | assemble a verified signed relay list from live relays; each `--dir-key` attests it with one of the N directory keys (M3 + M7) |
 | `warren send <peer> <msg>`           | ratchet-encrypt the body, spend one token, build a 3-hop Sphinx packet, verify signed list + handshake claims, send via entry relay |
-| `warren relay --start --port P`      | mix relay: unwrap-and-forward over TCP; `--admit-key`/`--epoch` enable the M2 gate; `--cover-rate N --network e,m,x` enable Poisson cover traffic (M5) |
+| `warren relay --start --port P`      | mix relay: unwrap-and-forward over TCP; `--admit-key`/`--epoch` enable the M2 gate; `--cover-rate N --network e,m,x` enable Poisson cover traffic (M5); `--bind 0.0.0.0`/`--advertise host:port` make a relay publicly reachable (deployment) |
 | `warren ratchet-init [--home]`       | create Layer-3 Olm account; print identity + one-time key to share with a peer (M3) |
 | `warren listen <addr:port> [--home]` | receive messages delivered by the exit relay, decrypting them with the Layer-3 ratchet |
 | `warren serve [--port] [--listen]`   | loopback HTTP API over this client, so a local process can use the mixnet as a message transport (M9) |

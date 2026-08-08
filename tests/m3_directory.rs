@@ -203,3 +203,50 @@ fn directory_fetch_cli_assembles_verified_list() {
     // The fetched entries match the relays' own signed claims exactly.
     assert_eq!(list.get(&entry.addr).unwrap(), &entry.claim);
 }
+
+/// A relay may bind a loopback/wildcard interface but **advertise** a
+/// different public `host:port` in its self-signed claim (deployment
+/// support: on a public host the claim must carry the externally reachable
+/// address, while the process still binds privately). This pins the behavior
+/// end-to-end: the startup claim uses the advertised address, its signature
+/// still verifies, and `directory-fetch` over the real handshake returns the
+/// advertised-address claim.
+#[test]
+fn relay_can_advertise_a_public_address_while_binding_loopback() {
+    let tmp = TempDir::new("m3-advertise");
+    let public = "203.0.113.9:7001"; // TEST-NET-3; must never be the bind addr
+    let relay = RelayProcess::spawn(&[
+        "--key",
+        &tmp.path().join("key-entry").to_string_lossy(),
+        "--advertise",
+        public,
+    ]);
+
+    // The process still bound loopback (the private-by-default default), but
+    // its claim now points clients at the public address.
+    assert!(
+        relay.addr.starts_with("127.0.0.1:"),
+        "bound address must stay loopback, got {}",
+        relay.addr
+    );
+    assert_eq!(
+        relay.claim.address, public,
+        "claim must advertise the public address"
+    );
+    assert!(
+        relay.claim.verify().is_ok(),
+        "advertised claim must still self-verify"
+    );
+
+    // A client assembling the list over the real handshake (to the *bound*
+    // loopback address) receives the advertised-address claim — so a gossip
+    // list built against this relay routes through the public host:port.
+    let fetched = warren::directory::fetch_claims_from(&[&relay.addr]).unwrap();
+    assert_eq!(fetched.entries.len(), 1);
+    assert_eq!(fetched.entries[0].address, public);
+    assert_eq!(
+        fetched.entries[0].identity_pubkey,
+        relay.claim.identity_pubkey
+    );
+    assert_eq!(fetched.entries[0].sphinx_pubkey, relay.claim.sphinx_pubkey);
+}

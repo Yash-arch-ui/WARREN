@@ -100,18 +100,41 @@ pub struct CoverConfig {
 ///
 /// The claim line is the relay's self-signed metadata; clients assemble it
 /// into a gossip list (see `warren directory-fetch`).
+///
+/// `bind` is the interface to listen on (default `127.0.0.1`; use `0.0.0.0`
+/// for a publicly reachable relay). `advertise` is the address signed into
+/// the claim — for a public relay this must be the externally reachable
+/// `host:port`, because clients look the list up by that exact string and
+/// cross-check the live claim against it. When `advertise` is `None`, the
+/// bound address is used (the loopback default — private by default).
 pub fn start(
+    bind: &str,
     port: u16,
+    advertise: Option<&str>,
     key_path: Option<&Path>,
     admission: Option<Arc<Mutex<RelayAdmission>>>,
     cover: Option<CoverConfig>,
 ) -> Result<()> {
     let keys = load_or_generate_keys(key_path)?;
-    let listener = TcpListener::bind(("127.0.0.1", port))?;
+    let listener = TcpListener::bind((bind, port))?;
     let actual = listener.local_addr()?.to_string();
+    // The claim address is what clients connect to and look up in their
+    // list, so it must be the *public* address when binding a wildcard.
+    let advertised = advertise.unwrap_or(&actual);
 
-    // Self-sign the claim once, at startup, over the *actual* bound address.
-    let claim = directory::sign_claim(&actual, *keys.sphinx_pk.as_bytes(), &keys.identity_sk);
+    // Self-sign the claim once, at startup, over the advertised address.
+    let claim = directory::sign_claim(advertised, *keys.sphinx_pk.as_bytes(), &keys.identity_sk);
+    println!(
+        "warren relay listening on {actual} sphinx={} identity={}",
+        hex::encode(keys.sphinx_pk.as_bytes()),
+        hex::encode(keys.identity_pk)
+    );
+    // Only when the public address differs from the bound one (wildcard
+    // bind): the integration-test harness parses the line above strictly, so
+    // the extra info lives on its own line.
+    if advertised != actual {
+        println!("advertised address: {advertised}");
+    }
     println!(
         "warren relay listening on {actual} sphinx={} identity={}",
         hex::encode(keys.sphinx_pk.as_bytes()),
@@ -125,7 +148,9 @@ pub fn start(
     // relay's own Sphinx secret.
     if let Some(cover) = cover.filter(|c| c.rate_per_sec > 0.0) {
         let network = cover.network.clone();
-        let self_addr = actual.clone();
+        // The chain's `--network` lists *public* addresses, so the relay must
+        // locate itself by its advertised address, not the bound one.
+        let self_addr = advertised.to_string();
         std::thread::spawn(move || {
             cover_loop(cover.rate_per_sec, cover.delay_mean_ms, network, self_addr)
         });
