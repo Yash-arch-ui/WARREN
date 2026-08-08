@@ -6,8 +6,8 @@
 ## 1. What is actually built (the anchor for everything below)
 
 The anonymity machinery that exists today is **Sphinx per-hop
-unlinkability** over a **3-hop path**, plus per-hop mix delay and
-token-gated admission:
+unlinkability** over a **3-hop path**, **exponential (Poisson) per-hop
+delay**, **cover traffic**, and token-gated admission:
 
 - `client` builds a 3-hop Sphinx packet; each relay peels one layer and
   learns only its immediate predecessor/successor (`src/client.rs`,
@@ -16,12 +16,21 @@ token-gated admission:
   (`tests/m1_routing.rs`: no relay log contains both the sender's and
   receiver's side of the path).
 - Relays **enforce** a per-hop mix delay (`[relays] delay_ms`,
-  `relay::enforce_delay`) — fixed, deterministic, tunable per user.
+  `relay::enforce_delay`). Since M5 each hop's delay is **sampled from an
+  exponential distribution** with the configured mean (Poisson mixing,
+  spec §3.2; `mix::exp_delay_ms`) — a distribution, not a constant,
+  tunable per user.
+- **Cover traffic is built (M5):** a relay configured with
+  `--cover-rate <n>` emits dummy Sphinx packets on a constant-rate Poisson
+  schedule, routed through its successors and dropped at the exit
+  (`relay::cover_loop`, `mix::poisson_interarrival_ms`). Cover packets are
+  byte-size-indistinguishable from real packets (Sphinx is constant-size —
+  pinned by `mix::tests::sphinx_packets_constant_size_across_path_lengths`)
+  and use the same empty-proof relay-to-relay framing, so a wire observer
+  cannot tell them apart (`tests/m6_mixing.rs`: the middle relay forwards
+  them identically and cannot mark them).
 - The **signed gossip list** pins relay identity keys (spec §8.5); a
   substituted relay is rejected before send.
-- **No cover traffic** is built. **No Poisson/randomized per-hop delay** is
-  built. There is no anonymity *padding* of any kind beyond Sphinx's
-  fixed-size packets.
 
 ## 2. What "anonymity set" means here
 
@@ -34,25 +43,27 @@ machinery that actually exists*.
 Sphinx hides which hops carry the packet and who sent it to whom: the
 observer sees fixed-size, layer-encrypted packets. **The anonymity set for
 the sender is, in principle, all users of the network who could have sent a
-message at that time** — *if* there were enough simultaneous traffic to make
-that meaningful.
+message at that time.** Two distinct effects bound the *practical* set:
 
-That "if" is the honest crux: **the practical anonymity set today is bounded
-by the number of concurrent real senders on the network, not padded by
-dummy traffic.** Concretely:
+- **Cover traffic (built, M5) pads the set.** Relays emit dummy packets on
+  Poisson schedules, so the traffic an observer can count at the network
+  edge is decoupled from *real* senders: an observer cannot tell cover from
+  real, so every cover packet expands the candidate set for a given
+  message. The M4-era limitation ("the set is bounded by concurrent real
+  senders, not padded") no longer applies — the set is **padded**, not just
+  bounded.
+- **Timing still leaks within the padded set.** With a single real sender
+  and heavy cover, the observer sees many packets but can still correlate
+  entry and exit events with *probabilistic* confidence using the delay
+  distribution and the network floor. Exponential per-hop delay raises that
+  cost (a constant is no longer subtractable); it does not eliminate it
+  (see §4 and `docs/LATENCY.md` §3).
 
-- If only one user is sending while an observer watches, the observer sees
-  one packet stream enter the network and (with timing correlation — see
-  §4) can match it to one exit. Anonymity set ≈ 1, regardless of the delay
-  knob.
-- With N concurrent real senders, a *single* observed message has an
-  anonymity set of at most N for the sender. This is the same bound every
-  real mixnet has without cover traffic; cover traffic is what decouples
-  "concurrent senders" from "traffic an adversary can count."
-
-This is exactly the limitation `docs/THREAT_MODEL.md` §3.1 names: cover
-traffic is a **named M4+ follow-up**, not built. This document does not
-pretend otherwise.
+The honest statement: **the anonymity set today is padded by cover traffic
+— not merely bounded by concurrent real senders — but it is still finite**
+and proportional to the cover volume (plus real traffic) at the time of a
+message, not to "all users of the network ever". Cover volume is a tunable
+cost (`--cover-rate`).
 
 ### 2.2 Against a single malicious/compromised relay
 
@@ -96,20 +107,22 @@ LATENCY.md`). The anonymity-relevant effects of each knob, stated honestly:
 
 | Configuration | Anonymity-relevant effect |
 |---|---|
-| **3 hops** (fixed) | Per-hop unlinkability against any *single* compromised relay (structural, verified). No *additional* protection against 3-relay collusion. No padding of the concurrent-sender bound. |
-| **delay_ms = 0** | No timing decoupling. An observer correlating entry/exit timings sees 1:1 message correspondence in time. Anonymity set = concurrent senders (see §2.1). |
-| **delay_ms = 25 / 50** | Adds a *fixed* hold time at entry + middle. Shifts the timing-correlation problem by a **constant** that a global observer can subtract. Provides **no** inter-message ambiguity between senders using the same config, and no ambiguity between real and (nonexistent) dummy traffic. |
-| **Relay count scaling (future)** | More relays per path increases the *collusion threshold* and the number of mixes a timing observer must correlate across — but does **not** create anonymity padding. Only cover traffic does. |
+| **3 hops** (fixed) | Per-hop unlinkability against any *single* compromised relay (structural, verified). No *additional* protection against 3-relay collusion. |
+| **delay_ms = 0** | No timing decoupling. An observer correlating entry/exit timings sees 1:1 message correspondence in time; cover padding (if enabled) still prevents *counting*. Anonymity set = concurrent real senders + cover volume (§2.1). |
+| **delay_ms = 25 / 50 (mean)** | Per-hop delays are **exponential** (M5): per-message timing is a distribution with an exponential tail, so there is no constant offset an observer can subtract. Raises the *cost* of timing correlation (probabilistic; not eliminated — §4). |
+| **cover-rate > 0** | Constant-rate Poisson dummy packets pad network volume: counting attacks fail (output volume decoupled from real senders), expanding the candidate set. No measurable real-message latency cost at 20/s (`docs/LATENCY.md` §2). |
+| **Relay count scaling (future)** | More relays per path increases the *collusion threshold* and the number of mixes a timing observer must correlate across — but does **not** create anonymity padding beyond what cover already provides. |
 
 **Bottom line, no overclaiming:** at the tested configurations the
 deliverable anonymity guarantees are (a) *per-hop path unlinkability* against
-a single compromised relay (verified), and (b) an anonymity set *bounded by
-concurrent real senders* against a passive observer. The delay knob does not
-increase the anonymity set — it increases the *effort* of timing
-correlation by a constant factor that a determined global adversary can
-calibrate out. The mechanisms that would actually grow the set — cover
-traffic, Poisson delay, and a larger relay directory with constrained
-selection — are all named future work, not built.
+a single compromised relay (verified), (b) a *cover-padded* anonymity set
+against a passive observer (bounded by cover volume + concurrent real
+traffic, not by real senders alone), and (c) *raised* — not eliminated —
+timing-correlation cost from exponential per-hop delay. What would still
+materially grow the set (a larger relay directory with constrained
+selection, SURB-based anonymous replies) remains named future work (§5);
+what the docs previously listed as unbuilt — cover traffic and Poisson
+delay — is now built and measured.
 
 ## 4. Timing correlation (the §9 honest admission)
 
@@ -119,21 +132,30 @@ mitigation (see `docs/LATENCY.md` §3). This is consistent with spec §9's own
 admission that global timing correlation is never fully solved; this
 implementation does not claim more.
 
-## 5. Deferred items that would materially change this analysis
+## 5. Built in M5, and what still remains
 
-These are flagged (not silently absent) in `docs/THREAT_MODEL.md` §3.1 and
-§6:
+**Built and measured in M5** (no longer deferred; flagged in
+`docs/THREAT_MODEL.md` §3.1):
 
-1. **Cover traffic** — the single biggest lever: padding the network with
-   indistinguishable dummy packets decouples "concurrent senders" from
-   "countable traffic" and directly grows the anonymity set. **M4+**
-   follow-up.
-2. **Poisson-distributed / randomized per-hop delay** — turns the constant
-   timing offset into a statistical distribution, the Loopix-style
-   mechanism that actually resists timing correlation. **M4+** follow-up.
-3. **Directory growth + constrained random path selection (per-operator
+1. **Cover traffic** — constant-rate Poisson dummy packets, wire-size
+   indistinguishable from real ones, dropped at the exit; verified over the
+   real path in `tests/m6_mixing.rs`. This is the single biggest lever for
+   anonymity-set growth and it is now in place.
+2. **Poisson-distributed / randomized per-hop delay** — exponential
+   per-hop delays (Loopix-style) replacing the fixed constant; shape pinned
+   deterministically in `mix::tests`, observed on the wire in
+   `tests/m6_mixing.rs`.
+
+**Still deferred** (flagged in `docs/THREAT_MODEL.md` §6):
+
+1. **Directory growth + constrained random path selection (per-operator
    caps)** — raises the collusion threshold (spec §3.2). Currently the path
    is a fixed 3-relay config. **M5+**.
-4. **SURB-based anonymous replies** — the recipient currently knows the
+2. **SURB-based anonymous replies** — the recipient currently knows the
    sender (§2.3); SURBs would allow reply without identity disclosure.
    **M5+**.
+3. **Loopix's full per-mix queueing** — relays buffer-and-sleep per
+   connection today (exponential hold per hop, as in Loopix), but the mix
+   does not yet reshape its own *arrival* process (batched mixing, loop
+   messages). The per-hop delay + cover combination is the core of §3.2; the
+   remaining queue-shaping details are M5+ refinements.

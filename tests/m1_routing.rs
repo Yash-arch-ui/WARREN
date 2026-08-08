@@ -131,7 +131,7 @@ fn three_hop_routing_delivers_and_no_relay_sees_sender_and_receiver() {
 /// legitimately be tiny. The honest statistical form: with 8 sends at mean
 /// 200 ms, at least one delivery must exceed 150 ms of enforced delay.
 /// Per message, P(entry+middle delay < 150 ms) for S = Exp(200)+Exp(200) is
-/// 1 − e^(−0.75)·1.75 ≈ 0.173, so P(all 8 under 150 ms) ≈ 0.173⁸ ≈ 3 × 10⁻⁶ —
+/// 1 − e^(−0.75)·1.75 ≈ 0.173, so P(all 8 under 150 ms) ≈ 0.173⁸ ≈ 8 × 10⁻⁷ —
 /// the test can only fail if the sleep mechanism is missing, never by luck.
 /// (The exact distribution shape is pinned deterministically in `mix::tests`;
 /// `tests/m6_mixing.rs` verifies the sampled delays on the wire.)

@@ -2,15 +2,19 @@
 
 A minimal CLI client for a mixnet-routed messenger.
 
-**Current milestone: M4.** Real 3-hop Sphinx routing over local TCP with
-**enforced, tunable per-hop mix delay** (M1), reputation-gated admission
-with blind-signature tokens (M2), a signed relay/gossip list verified by the
-client (M3), Layer-3 message-body encryption with the Olm Double Ratchet
-(M3, via `vodozemac`), and the M4 measurements + writeup
-(`docs/LATENCY.md`, `docs/ANONYMITY_ANALYSIS.md`, `docs/SPAM_RESISTANCE.md`,
+**Current milestone: M5.** Real 3-hop Sphinx routing over local TCP with
+**enforced per-hop mix delay** (M1; since M5 **exponential/Poisson** — each
+hop's delay is sampled from Exp(mean `delay_ms`)), **constant-rate Poisson
+cover traffic** (M5: relays emit dummy Sphinx packets, routed like real
+packets, dropped at the exit — wire-indistinguishable and independent of
+the token gate), reputation-gated admission with blind-signature tokens
+(M2), a signed relay/gossip list verified by the client (M3), Layer-3
+message-body encryption with the Olm Double Ratchet (M3, via `vodozemac`),
+and the M4/M5 measurements + writeup (`docs/LATENCY.md`,
+`docs/ANONYMITY_ANALYSIS.md`, `docs/SPAM_RESISTANCE.md`,
 `docs/M4_SUMMARY.md`) are done. Still out of scope: real gossip
-*propagation* (M5+), a separate directory authority, cover traffic and
-Poisson timing mixing (M4+), transport obfuscation.
+*propagation* (M5+), a separate directory authority, full per-mix queue
+shaping / loop messages, transport obfuscation.
 
 ## Why Rust
 
@@ -45,8 +49,9 @@ $ cat > ~/.unlink/config.toml <<'EOF'
 entry     = "127.0.0.1:7001"
 middle    = "127.0.0.1:7002"
 exit      = "127.0.0.1:7003"
-delay_ms  = 10   # per-hop mix delay (spec §3.2): each relay sleeps this
-                 # long before forwarding; 0 = no delay, tunable per user
+delay_ms  = 10   # MEAN per-hop mix delay (ms, spec §3.2): each hop's delay
+                 # is sampled from an exponential with this mean (Poisson
+                 # mixing, M5); 0 = no delay, tunable per user
 
 [peers.bob]
 addr = "127.0.0.1:9001"   # bob's delivery address
@@ -79,7 +84,7 @@ rotates its keys.
 | `unlink token-issue [--count N]`     | issue a blind-token batch (M2 dev tool) |
 | `unlink directory-fetch <addr>...`   | assemble a verified signed relay list from live relays (M3) |
 | `unlink send <peer> <msg>`           | ratchet-encrypt the body, spend one token, build a 3-hop Sphinx packet, verify signed list + handshake claims, send via entry relay |
-| `unlink relay --start --port P`      | mix relay: unwrap-and-forward over TCP; `--admit-key`/`--epoch` enable the M2 gate |
+| `unlink relay --start --port P`      | mix relay: unwrap-and-forward over TCP; `--admit-key`/`--epoch` enable the M2 gate; `--cover-rate N --network e,m,x` enable Poisson cover traffic (M5) |
 | `unlink ratchet-init [--home]`       | create Layer-3 Olm account; print identity + one-time key to share with a peer (M3) |
 | `unlink listen <addr:port> [--home]` | receive messages delivered by the exit relay, decrypting them with the Layer-3 ratchet |
 
@@ -95,23 +100,25 @@ src/
   lib.rs        # module map
   client.rs     # keygen, path fetch, Sphinx packet build, send+proof, listen
   ratchet.rs    # Layer-3 Olm Double Ratchet: account + per-peer sessions (M3)
-  relay.rs      # unwrap-and-forward loop + admission gate + signed identity claim
+  relay.rs      # unwrap-and-forward loop + admission gate + signed identity claim + cover emitter
+  mix.rs        # M5 timing mixing: exponential per-hop delay + Poisson cover scheduling
   directory.rs  # signed relay claims + gossip list verify (M3)
   credential.rs # blind-signature tokens: issuer / wallet / relay admission
   net.rs        # plain-TCP framing (transport obfuscation is M-later)
   config.rs     # client TOML config (relay path + peers, incl. Layer-3 keys)
 tests/
   cli_smoke.rs        # CLI-level smoke tests
-  m1_routing.rs       # 3 real relays: delivery + no relay sees sender & receiver
+  m1_routing.rs       # 3 real relays: delivery + no relay sees sender & receiver + delay enforcement
   m2_admission.rs     # valid / replay / out-of-tokens / unlinkability over the wire
   m3_directory.rs     # signed list: valid routing + unsigned/tampered/forged rejection
   m4_ratchet.rs       # full bidirectional Double Ratchet session over the real path
   m5_load.rs          # concurrent token abuse: relay stays responsive, drops correct
+  m6_mixing.rs        # Poisson delay on the wire + cover traffic vs. the admission gate (M5)
 docs/
-  LIBRARY_SELECTION.md    # sphinx-packet (§1) + blind-rsa-signatures (§2) + ed25519 (§4) + vodozemac (§5)
+  LIBRARY_SELECTION.md    # sphinx-packet (§1) + blind-rsa-signatures (§2) + ed25519 (§4) + vodozemac (§5) + timing mixing (§6)
   THREAT_MODEL.md         # adversary model, credential guarantees, MVP non-goals
-  LATENCY.md              # latency data + per-hop-delay tradeoff (M4)
-  ANONYMITY_ANALYSIS.md   # anonymity-set analysis at tested configs (M4)
+  LATENCY.md              # latency data + per-hop-delay tradeoff (M4, M5 updates)
+  ANONYMITY_ANALYSIS.md   # anonymity-set analysis at tested configs (M4, M5 updates)
   SPAM_RESISTANCE.md      # token-gating spam-resistance argument (M4)
   M4_SUMMARY.md           # milestone summary: built / follow-ups / out-of-scope
 .github/workflows/ci.yml # fmt + clippy + test

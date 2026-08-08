@@ -54,11 +54,19 @@ impl RelayProcess {
     /// Spawn `unlink relay --start --port 0 <extra args>` and wait until it
     /// reports its actual address + public key.
     pub fn spawn(extra: &[&str]) -> Self {
+        Self::spawn_with_port(0, extra)
+    }
+
+    /// Like [`spawn`], but on a caller-chosen fixed port. Needed when the
+    /// address must be known *before* the process starts — e.g. cover-traffic
+    /// tests, where a relay's `--network` flag names the whole chain
+    /// (including itself) up front.
+    pub fn spawn_with_port(port: u16, extra: &[&str]) -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_unlink"))
             .arg("relay")
             .arg("--start")
             .arg("--port")
-            .arg("0")
+            .arg(port.to_string())
             .args(extra)
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())

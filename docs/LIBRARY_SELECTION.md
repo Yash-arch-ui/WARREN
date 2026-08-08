@@ -392,3 +392,53 @@ plaintext, decrypts both in order, then asserts **replaying either message
 after the ratchet advanced fails** — the exact forward-secrecy property the
 crate claims, pinned in code. `tests/m4_ratchet.rs` additionally drives a
 full bidirectional session over the real 3-hop relay path.
+
+---
+
+# §6 Poisson delay & cover traffic (M5)
+
+**Design decision: no new library — build on what is already in the tree.**
+
+## The check (step 1 of the M5 task, done before writing code)
+
+**Is there a maintained Rust crate for Loopix-style Poisson mixing?** No.
+Checked crates.io and the Nym project: Nym's timing mixing (the
+`nym-sphinx` header delays, `nym-mixnode`'s Poisson delay queue, cover/loop
+drop messages) is **embedded in Nym's node software** — its crates are
+published only as internal pieces of the `nymtech/nym` monorepo, tightly
+coupled to the node's event loops and topology; there is no standalone,
+reusable "Poisson mix scheduler" crate on crates.io. This is the same
+situation as M1's Sphinx check, but reversed: `sphinx-packet` *is* a
+reusable crate, while the timing layer is not. Nothing on crates.io named
+`mixnet`/`loopix` is a maintained library for this.
+
+**So this is a design/parameter question, as suspected** — the primitives
+were already in the dependency tree:
+
+- **Exponential sampling:** `rand_distr` is already a direct dependency of
+  `sphinx-packet` 0.7.0 — `sphinx-packet`'s own `Delay` type samples from
+  `rand_distr::Exp` (verified in `header/delays.rs` of the published
+  crate). Adding `rand_distr = "0.6"` to our `Cargo.toml` reuses the
+  **already-locked** version (0.6.0, paired with our `rand 0.10.2`)
+  — zero new transitive dependencies, and the same distribution type the
+  Sphinx header crate itself uses. `Exp::new(lambda)` takes the *rate*
+  (mean = 1/λ), so the client samples `Exp(1 / delay_ms)` per hop
+  (`mix::exp_delay_ms`).
+- **Constant-rate Poisson cover scheduling:** the same `Exp` distribution
+  gives Poisson inter-arrival times (`mix::poisson_interarrival_ms`); the
+  relay's existing sleep-before-forward mechanism (`relay::enforce_delay`)
+  and thread-per-connection model host the emitter with no timers
+  framework needed (a plain `thread::sleep` loop; no tokio required — this
+  project is deliberately synchronous).
+- **Wire-indistinguishability of cover packets** rests on a *property of
+  the Sphinx format we already use*: packet size is constant regardless of
+  path length (the crate sizes the header by `MAX_PATH_LENGTH`, not the
+  actual route). Verified in code
+  (`mix::tests::sphinx_packets_constant_size_across_path_lengths`), so a
+  relay-generated cover packet is byte-size identical to a real one.
+
+**Alternatives rejected:** hand-rolling inverse-CDF exponential sampling
+(unnecessary — the verified primitive is already in the tree); adopting
+Nym's internal crates (not published for standalone use); introducing
+`tokio` just for timers (the synchronous design already sleeps per
+connection; a tokio event loop would be a rewrite, not a reuse).

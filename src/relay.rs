@@ -27,8 +27,13 @@
 //! sender-controlled, so an uncapped sleep would let one malicious frame pin
 //! a relay thread (and its open socket) for an arbitrarily long time.
 //!
-//! **Cover traffic (spec §3.2) lands in the second half of M5** (the
-//! relay-side dummy-packet emitter, its own commit).
+//! **Cover traffic (M5, spec §3.2):** a relay configured with
+//! [`CoverConfig`] emits random-payload Sphinx packets on a Poisson schedule,
+//! routed through its successors and terminated at a reserved drop
+//! destination the exit discards instead of delivering. Cover is generated
+//! in-process — *after* the M2 admission gate — and forwarded with the same
+//! empty-proof framing as real relay-to-relay traffic, so it is
+//! wire-indistinguishable from real traffic and never spends tokens.
 
 /// Upper bound a relay will sleep for a sender-chosen per-hop delay, in
 /// milliseconds. Defense against the unbounded-delay DoS: a client can put
@@ -49,6 +54,7 @@ use sphinx_packet::SphinxPacket;
 use sphinx_packet::constants::SECURITY_PARAMETER;
 use sphinx_packet::header::delays::Delay;
 use sphinx_packet::packet::ProcessedPacketData;
+use sphinx_packet::route::{Destination, DestinationAddressBytes, Node, NodeAddressBytes};
 use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::credential::{AdmissionDecision, RelayAdmission};
@@ -66,6 +72,24 @@ pub struct RelayKeys {
     pub identity_pk: [u8; 32],
 }
 
+/// Cover-traffic configuration (M5, spec §3.2's "cover traffic... tunable per
+/// user"). `Some` with `rate_per_sec > 0` makes the relay emit dummy Sphinx
+/// packets on a constant-rate Poisson schedule, routed through its successors
+/// and dropped at the exit.
+pub struct CoverConfig {
+    /// Cover packets per second (Poisson process rate; mean inter-arrival is
+    /// 1/rate). 0 disables emission even if a config is present.
+    pub rate_per_sec: f64,
+    /// Mean per-hop delay (ms) for cover packets, sampled from Exp — cover
+    /// must not be distinguishable from real traffic by timing either.
+    pub delay_mean_ms: u64,
+    /// The relay's view of the mix chain, in mix order (this relay included).
+    /// The relay finds its own position and routes cover through its
+    /// successors. Needed because relays do not run a directory (M5+); the
+    /// operator passes the fixed chain it belongs to.
+    pub network: Vec<String>,
+}
+
 /// Run the relay loop. Blocks forever. Prints a machine-readable startup
 /// block once bound:
 ///
@@ -80,6 +104,7 @@ pub fn start(
     port: u16,
     key_path: Option<&Path>,
     admission: Option<Arc<Mutex<RelayAdmission>>>,
+    cover: Option<CoverConfig>,
 ) -> Result<()> {
     let keys = load_or_generate_keys(key_path)?;
     let listener = TcpListener::bind(("127.0.0.1", port))?;
@@ -93,6 +118,18 @@ pub fn start(
         hex::encode(keys.identity_pk)
     );
     println!("relay claim: {}", claim.to_json_string()?);
+
+    // Cover traffic (M5): a dedicated emitter thread so the accept loop and
+    // per-connection handlers are never blocked by cover scheduling. It only
+    // needs the successor *public* keys (fetched over the handshake), not the
+    // relay's own Sphinx secret.
+    if let Some(cover) = cover.filter(|c| c.rate_per_sec > 0.0) {
+        let network = cover.network.clone();
+        let self_addr = actual.clone();
+        std::thread::spawn(move || {
+            cover_loop(cover.rate_per_sec, cover.delay_mean_ms, network, self_addr)
+        });
+    }
 
     for stream in listener.incoming() {
         let stream = match stream {
@@ -208,6 +245,14 @@ fn handle_sphinx(
                 ..
             } => {
                 let addr = net::field_to_addr(&destination.as_bytes());
+                if mix::is_drop_destination(&addr) {
+                    // Cover traffic (M5): a reserved drop destination is
+                    // discarded here rather than delivered. The destination
+                    // lives inside the innermost Sphinx layer, so only this
+                    // relay can see it — a wire observer cannot.
+                    println!("drop: cover");
+                    return;
+                }
                 println!("deliver to {addr}");
                 let msg = parse_payload(payload.as_bytes());
                 deliver(&addr, &msg);
@@ -272,6 +317,106 @@ fn forward_packet(addr: &str, packet_bytes: &[u8]) -> Result<()> {
     let mut upstream = net::connect(addr)?;
     net::send_frame(&mut upstream, net::FRAME_SPHINX, &body)?;
     Ok(())
+}
+
+/// Run a relay's cover-traffic emitter: on a Poisson schedule, build a
+/// random-payload Sphinx packet routed through this relay's successors and
+/// push it to the first one. The packet terminates at a reserved
+/// [`mix::DROP_DESTINATION_PREFIX`] address, so the exit drops it instead of
+/// delivering. Cover is generated in-process — after the M2 admission gate —
+/// and forwarded with the same empty-proof framing as real relay-to-relay
+/// traffic, so it never touches the token gate and is wire-indistinguishable
+/// from real forwarding.
+///
+/// Successor keys are fetched over the relay handshake (the signed claim) and
+/// cached; if the successors are not up yet (relay startup order), the loop
+/// retries on the next tick instead of dying.
+fn cover_loop(rate: f64, delay_mean_ms: u64, network: Vec<String>, self_addr: String) {
+    let Some(pos) = network.iter().position(|a| *a == self_addr) else {
+        eprintln!("cover: own address {self_addr} not found in --network; cover disabled");
+        return;
+    };
+    let successors: Vec<String> = network[pos + 1..].to_vec();
+    if successors.is_empty() {
+        // Exit relay: no successors to route cover through; nothing to pad.
+        return;
+    }
+    let mut rng = rand::rng();
+    let mut keys: Option<crate::directory::SignedRelayList> = None;
+    loop {
+        let wait = mix::poisson_interarrival_ms(rate, &mut rng);
+        std::thread::sleep(Duration::from_millis(wait.max(1)));
+
+        if keys.is_none() {
+            let addrs: Vec<&str> = successors.iter().map(String::as_str).collect();
+            match crate::directory::fetch_claims_from(&addrs) {
+                Ok(list) => keys = Some(list),
+                Err(e) => {
+                    eprintln!("cover: successors not reachable yet: {e}");
+                    continue;
+                }
+            }
+        }
+
+        match build_cover_packet(&successors, keys.as_ref().unwrap(), &mut rng, delay_mean_ms) {
+            Ok(packet) => {
+                // Own-emission log (a relay knows its own cover; a wire
+                // observer does not). Only the exit relay ever sees the drop
+                // destination, so this cannot mark cover on the wire.
+                println!(
+                    "cover: sent {} B to {}",
+                    packet.to_bytes().len(),
+                    successors[0]
+                );
+                if let Err(e) = forward_packet(&successors[0], &packet.to_bytes()) {
+                    eprintln!("cover: forward failed: {e}");
+                }
+            }
+            Err(e) => eprintln!("cover: build failed: {e}"),
+        }
+    }
+}
+
+/// Build one cover Sphinx packet: a random payload routed through `successors`
+/// and terminated at a reserved drop destination. Same wire format as a real
+/// packet (constant-size Sphinx, per-hop delays sampled from Exp), so it is
+/// indistinguishable to a wire observer; the final relay drops it.
+fn build_cover_packet(
+    successors: &[String],
+    list: &crate::directory::SignedRelayList,
+    rng: &mut impl rand::RngExt,
+    delay_mean_ms: u64,
+) -> Result<SphinxPacket> {
+    let route: Vec<Node> = successors
+        .iter()
+        .map(|addr| {
+            let claim = list
+                .get(addr)
+                .ok_or_else(|| anyhow!("cover: {addr} not in successor claims"))?;
+            Ok(Node::new(
+                NodeAddressBytes::from_bytes(net::addr_to_field(addr)?),
+                PublicKey::from(claim.sphinx_pubkey),
+            ))
+        })
+        .collect::<Result<_>>()?;
+    let destination = Destination::new(
+        DestinationAddressBytes::from_bytes(net::addr_to_field(&format!(
+            "{}cover",
+            mix::DROP_DESTINATION_PREFIX
+        ))?),
+        [0u8; 16],
+    );
+    let delays: Vec<Delay> = (0..successors.len())
+        .map(|_| mix::delay_from_ms(mix::exp_delay_ms(delay_mean_ms, rng)))
+        .collect();
+    // Random payload (content is encrypted by Sphinx and dropped at the exit;
+    // it exists so the packet is not structurally empty).
+    let mut payload = vec![0u8; 64];
+    for b in payload.iter_mut() {
+        *b = rng.random_range(0..=u8::MAX);
+    }
+    SphinxPacket::new(payload, &route, &destination, &delays)
+        .map_err(|e| anyhow!("cover: SphinxPacket::new failed: {e}"))
 }
 
 fn deliver(receiver_addr: &str, msg: &[u8]) {
@@ -425,6 +570,53 @@ mod tests {
             "hostile delay must be clamped to the cap"
         );
         assert!(clamped, "over-cap delay must be flagged as clamped");
+    }
+
+    /// A cover packet must be a real, processable Sphinx packet: routed
+    /// through the successors and terminated at a reserved drop destination
+    /// (so the exit discards it) — verified in code, not assumed.
+    #[test]
+    fn cover_packet_routes_to_successors_and_terminates_at_drop() {
+        use rand::SeedableRng;
+        use rand::rngs::StdRng;
+
+        let sk1 = StaticSecret::random();
+        let pk1 = PublicKey::from(&sk1);
+        let sk2 = StaticSecret::random();
+        let pk2 = PublicKey::from(&sk2);
+        let id_sk1 = ed25519_dalek::SigningKey::from_bytes(&rand::random::<[u8; 32]>());
+        let id_sk2 = ed25519_dalek::SigningKey::from_bytes(&rand::random::<[u8; 32]>());
+        let a1 = "127.0.0.1:7002";
+        let a2 = "127.0.0.1:7003";
+        let list = crate::directory::SignedRelayList::from_claims(vec![
+            directory::sign_claim(a1, *pk1.as_bytes(), &id_sk1),
+            directory::sign_claim(a2, *pk2.as_bytes(), &id_sk2),
+        ]);
+        let successors = vec![a1.to_string(), a2.to_string()];
+        let mut rng = StdRng::seed_from_u64(9);
+        let packet = build_cover_packet(&successors, &list, &mut rng, 10).unwrap();
+
+        // Hop 1 (middle): a plain forward hop to the exit — nothing about the
+        // packet marks it as cover at this layer.
+        let p2 = match packet.process(&sk1).unwrap().data {
+            ProcessedPacketData::ForwardHop {
+                next_hop_packet,
+                next_hop_address,
+                ..
+            } => {
+                assert_eq!(net::field_to_addr(next_hop_address.as_bytes()), a2);
+                next_hop_packet
+            }
+            _ => panic!("cover hop 1 must be a forward hop"),
+        };
+        // Hop 2 (exit): final hop with the reserved drop destination.
+        match p2.process(&sk2).unwrap().data {
+            ProcessedPacketData::FinalHop { destination, .. } => {
+                let addr = net::field_to_addr(&destination.as_bytes());
+                assert!(mix::is_drop_destination(&addr), "got {addr}");
+            }
+            _ => panic!("cover hop 2 must be the final hop"),
+        }
     }
 
     #[test]

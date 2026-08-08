@@ -13,19 +13,20 @@ and `docs/THREAT_MODEL.md` are the precise references.*
 | **M2 — Layer 2: admission** | Blind-signature tokens (RFC 9474, Privacy Pass v1) gate entry: unlinkable per-redemption, epoch-scoped double-spend set, proof checked ahead of mix layers. **Concurrent spam-resistance demonstrated.** | `tests/m2_admission.rs` (valid/replay/out-of-tokens/unlinkability); `tests/m5_load.rs` (8 clients, 200 concurrent frames, exact per-category rejection, relay responsive after) |
 | **M3 — directory + Layer 3** | **Directory (beyond base MVP bar):** relays self-sign claims with long-term ed25519 keys; clients verify a signed gossip list and cross-check live handshake claims against it (§5.4, §8.5). **Message content:** Olm Double Ratchet encryption (forward secrecy + break-in recovery, verified against the crate source), full bidirectional session over the real path. | `tests/m3_directory.rs` (valid/unsigned/tampered/forged); `tests/m4_ratchet.rs` (bidirectional session, fresh key per message); `ratchet::tests` (N+1 key property, persistence) |
 | **M4 — measurements + writeup** | Latency measured at 3 config points (`delay_ms` 0/25/50); anonymity-set and spam-resistance analysis written without overclaiming; per-hop-delay tradeoff documented. | `tests/latency_measure.rs` (ignored harness); `docs/LATENCY.md`, `docs/ANONYMITY_ANALYSIS.md`, `docs/SPAM_RESISTANCE.md` |
+| **M5 — timing mixing** | **Exponential (Poisson) per-hop delay** (each hop's delay sampled from Exp(mean `delay_ms`); shape pinned deterministically) and **constant-rate Poisson cover traffic** (relays emit dummy Sphinx packets, routed like real packets, dropped at the exit; byte-size-indistinguishable). Both verified on the real path, including that cover bypasses the M2 admission gate without touching it. | `mix::tests` (deterministic distribution shape + constant-size Sphinx); `tests/m6_mixing.rs` (wire-varied delays; cover/admission interaction); `tests/m1_routing.rs` (Poisson-safe enforcement test); `tests/latency_measure.rs` (4 config points incl. cover); `docs/LATENCY.md`, `docs/ANONYMITY_ANALYSIS.md` (M5 updates) |
 
-**Test suite:** 51 tests passing; `cargo clippy --all-targets -- -D warnings`
-clean; `cargo fmt` clean (as of commit `1d50df6` + this M4 checkpoint).
+**Test suite:** 59 tests passing; `cargo clippy --all-targets -- -D warnings`
+clean; `cargo fmt` clean (as of commit `8637699` + this M5 checkpoint).
 
 ## 2. Named follow-ups (per `docs/THREAT_MODEL.md` §3.1, §3.2, §6)
 
 These are explicitly flagged future work, not silently absent:
 
-- **Cover traffic** (dummy packets indistinguishable from real ones) — the
-  single biggest lever for real anonymity-set growth. **M4+**.
-- **Poisson-distributed / randomized per-hop delay** (Loopix/Nym-style
-  jitter) — replaces the current fixed per-hop delay's constant timing
-  offset with a statistical distribution. **M4+**.
+- ~~**Cover traffic**~~ and ~~**Poisson-distributed per-hop delay**~~ — the
+  two items M4 listed as the top timing follow-ups are **built in M5**
+  (see the M5 row above and `docs/LATENCY.md`/`docs/ANONYMITY_ANALYSIS.md`).
+  Remaining timing-mixing refinement: full per-mix queue shaping / loop
+  messages (the rest of Loopix's mechanism). **M5+**.
 - **Full gossip propagation / separate directory authority** — the signed
   list mechanics are real; propagation (exchanging lists, a DHT) and an
   out-of-band directory/pubkey that vouches for relay identity keys are

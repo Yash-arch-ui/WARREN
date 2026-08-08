@@ -152,29 +152,39 @@ revisited deliberately, not by accident.
    that requires traffic shaping, cover traffic, and mix strategies
    (e.g., Poisson mixing) beyond MVP.
 
-   **Implemented (M3):** a **fixed per-hop mix delay, tunable per user**
-   (spec §3.2 "randomized per-hop delay and cover traffic… tunable per
-   user" — the *fixed* half): `[relays] delay_ms` rides in each hop's
-   Sphinx header and each relay **enforces** it by sleeping before
-   forwarding (`src/relay.rs`), so a user can trade latency for a basic
-   level of mixing at multiple config points (M4 measures at ≥2 values;
-   `tests/latency_measure.rs`, `docs/LATENCY.md`). The honored delay is
-   **capped** at `relay::MAX_HONORED_DELAY_MS` (30 s): the header value is
-   sender-controlled, so an uncapped sleep would let one hostile frame pin
-   a relay's connection thread indefinitely (DoS; pinned by
-   `relay::tests::delay_enforced_and_capped`). Existing mitigation:
-   fixed-size packets (no length signal) and no plaintext routing metadata.
+   **Implemented (M3 → M5), spec §3.2's "randomized per-hop delay and cover
+   traffic… tunable per user":**
 
-   **Named follow-ups (not silently absent):** (a) **real cover traffic**
-   packets (dummy messages so an observer cannot distinguish real traffic
-   from silence, nor count messages per user); (b) **Poisson-distributed /
-   randomized per-hop delay** (Loopix/Nym-style jitter) instead of the
-   current single fixed value. Both are beyond MVP scope and deliberately
-   deferred; per spec §3.2's own framing they are core Layer-1
-   architecture, so they are flagged here as the top M4+ timing items
-   rather than dropped.
+   - **Fixed per-hop delay (M3).** `[relays] delay_ms` rode in each hop's
+     Sphinx header and each relay **enforced** it by sleeping before
+     forwarding. Honored delays are **capped** at
+     `relay::MAX_HONORED_DELAY_MS` (30 s): the header value is
+     sender-controlled, so an uncapped sleep would let one hostile frame
+     pin a relay's connection thread indefinitely (DoS; pinned by
+     `relay::tests::delay_clamped_and_enforced`).
+   - **Exponential (Poisson) per-hop delay (M5).** `delay_ms` is now the
+     *mean* of an exponential distribution: the sender samples each hop's
+     delay from Exp(mean) (`mix::exp_delay_ms`), so per-message timing is a
+     distribution with an exponential tail, not a constant an observer can
+     subtract. The shape is pinned deterministically in `mix::tests` and
+     observed on the wire in `tests/m6_mixing.rs`.
+   - **Cover traffic (M5).** Relays configured with `--cover-rate <n>`
+     emit dummy Sphinx packets on a constant-rate Poisson schedule, routed
+     through their successors and dropped at the exit (`relay::cover_loop`;
+     a reserved drop destination, `mix::DROP_DESTINATION_PREFIX`). Cover is
+     generated **after the M2 admission gate** (in-process), so it neither
+     spends tokens nor interacts with the spam gate — verified explicitly
+     in `tests/m6_mixing.rs` — and is byte-size-indistinguishable from real
+     packets (Sphinx constant size, pinned by
+     `mix::tests::sphinx_packets_constant_size_across_path_lengths`).
+
    *Global timing correlation remains the single biggest known gap and is
-   deliberately deferred.*
+   deliberately deferred.* Exponential per-hop delay + cover traffic raise
+   the cost of timing correlation (and break naive counting), but do **not**
+   eliminate it — the writeups (`docs/LATENCY.md`, `docs/ANONYMITY_ANALYSIS.md`)
+   state this plainly, consistent with spec §9's own admission. Remaining
+   timing-mixing refinements (full per-mix queue shaping, loop messages) are
+   M5+.
 
 2. **Sybil attacks on the directory.** An adversary who can flood the
    directory with colluding relays can increase `P(all hops adversarial)`.
@@ -297,9 +307,11 @@ We use `blind-rsa-signatures` (RFC 9474 / Privacy Pass v1) — see
 - Network-split issuer (issue over the wire, issuer key outside the client's
   data dir) — `Issuer::blind_sign` already takes only `BlindMessage`s, so
   the split is a serialization/transport exercise.
-- **Cover traffic + Poisson/randomized per-hop delay** (spec §3.2's core
-  Layer-1 timing architecture, beyond the fixed tunable delay implemented in
-  M3 — see §3.1): dummy cover packets and Loopix/Nym-style delay
-  distributions are the top M4+ timing items.
-- SURB-based replies; transport obfuscation; timing mixing (§3.1).
-  (Double Ratchet content encryption is **done** — M3, §2.D.)
+- **Cover traffic + Poisson/randomized per-hop delay are BUILT (M5)** —
+  spec §3.2's core Layer-1 timing architecture: exponential per-hop delay
+  and constant-rate Poisson cover are implemented, verified
+  (`tests/m6_mixing.rs`), and measured (`docs/LATENCY.md`); see §3.1.
+  Remaining timing-mixing refinement: full per-mix queue shaping / loop
+  messages (the rest of Loopix's mechanism).
+- SURB-based replies; transport obfuscation. (Double Ratchet content
+  encryption is **done** — M3, §2.D.)

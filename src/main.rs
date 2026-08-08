@@ -82,6 +82,15 @@ enum Command {
         admit_key: Option<PathBuf>,
         #[arg(long, help = "admission epoch (default: current day)")]
         epoch: Option<u64>,
+        #[arg(long, help = "cover traffic rate (packets/s, Poisson; 0 = off)")]
+        cover_rate: Option<f64>,
+        #[arg(long, help = "mean per-hop delay for cover packets (ms; default 10)")]
+        cover_delay_ms: Option<u64>,
+        #[arg(
+            long,
+            help = "mix chain this relay belongs to, comma-separated in order (required with --cover-rate)"
+        )]
+        network: Option<String>,
     },
 }
 
@@ -159,6 +168,9 @@ fn run(cmd: Command) -> anyhow::Result<String> {
             key,
             admit_key,
             epoch,
+            cover_rate,
+            cover_delay_ms,
+            network,
         } => {
             if !start {
                 anyhow::bail!(
@@ -175,7 +187,34 @@ fn run(cmd: Command) -> anyhow::Result<String> {
                 }
                 None => None,
             };
-            relay::start(port, key.as_deref(), admission)?;
+            // Cover traffic (M5): only when a positive rate is requested. The
+            // relay needs its own position in the chain to route cover through
+            // its successors, so --network is required (relays have no
+            // directory yet — M5+).
+            let cover = match cover_rate {
+                Some(rate) if rate > 0.0 => {
+                    let network: Vec<String> = network
+                        .as_deref()
+                        .map(|n| {
+                            n.split(',')
+                                .map(|s| s.trim().to_string())
+                                .filter(|s| !s.is_empty())
+                                .collect()
+                        })
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "--cover-rate requires --network (the mix chain, in order)"
+                            )
+                        })?;
+                    Some(relay::CoverConfig {
+                        rate_per_sec: rate,
+                        delay_mean_ms: cover_delay_ms.unwrap_or(config::DEFAULT_DELAY_MS),
+                        network,
+                    })
+                }
+                _ => None,
+            };
+            relay::start(port, key.as_deref(), admission, cover)?;
             Ok("relay stopped".into())
         }
     }
