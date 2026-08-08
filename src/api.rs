@@ -382,16 +382,24 @@ impl EventHub {
     }
 }
 
-/// Everything a request handler needs. Config, relay list and the ratchet
-/// account are loaded once at startup rather than per request — the CLI
-/// [`client::send`] re-reads them every call, which is right for a one-shot
-/// command and wrong for a daemon.
+/// Everything a request handler needs.
+///
+/// `config`/`list` are a **startup snapshot for the UI endpoints only**. The
+/// send path deliberately re-reads config, relay list, wallet and ratchet
+/// from disk on every send — exactly like the one-shot CLI [`client::send`]
+/// re-reads them on every invocation. A daemon that spends from
+/// startup-loaded memory silently diverges from the CLI the moment anything
+/// on disk changes (a re-issued token batch, an edited peer list, a
+/// re-fetched relay list): the CLI keeps working while `/send` fails with a
+/// stale "out of tokens" or "unknown peer".
 struct ServeState {
     home: PathBuf,
+    /// Config + relay-list paths, so every send can re-read them from disk
+    /// (CLI parity).
+    config_path: PathBuf,
+    relays_path: PathBuf,
     config: Config,
     list: SignedRelayList,
-    ratchet: Mutex<RatchetClient>,
-    wallet: Mutex<ClientTokenWallet>,
     inbox: Mutex<Inbox>,
     counter: AtomicU64,
     listen_addr: String,
@@ -410,10 +418,13 @@ impl ServeState {
     ) -> Result<Self> {
         let config = Config::load(config_path)?;
         let list = SignedRelayList::load_and_verify(relays_path)?;
-        let ratchet = RatchetClient::load(home)
-            .context("no ratchet state — run `warren ratchet-init` first")?;
+        // Startup guards only — the CLI re-checks both on every invocation,
+        // and so does the send path below; these one-time checks just fail
+        // fast with the same guidance instead of letting every send error
+        // later. Nothing here becomes live state.
+        RatchetClient::load(home).context("no ratchet state — run `warren ratchet-init` first")?;
         let wallet_path = home.join("wallet.json");
-        let wallet = ClientTokenWallet::load(&wallet_path).with_context(|| {
+        ClientTokenWallet::load(&wallet_path).with_context(|| {
             format!(
                 "no token wallet at `{}` — run `warren token-issue` first",
                 wallet_path.display()
@@ -421,10 +432,10 @@ impl ServeState {
         })?;
         Ok(Self {
             home: home.to_path_buf(),
+            config_path: config_path.to_path_buf(),
+            relays_path: relays_path.to_path_buf(),
             config,
             list,
-            ratchet: Mutex::new(ratchet),
-            wallet: Mutex::new(wallet),
             inbox: Mutex::new(Inbox::default()),
             counter: AtomicU64::new(0),
             listen_addr: listen_addr.to_string(),
@@ -435,16 +446,18 @@ impl ServeState {
 
     /// The 3-hop path this client sends over, resolved against the signed
     /// relay list so the keys shown are the ones the packet is built for.
-    fn hops(&self) -> Vec<HopRecord> {
+    /// Takes the *fresh* config + list the send was built against, never the
+    /// startup snapshot.
+    fn hops(&self, config: &Config, list: &SignedRelayList) -> Vec<HopRecord> {
         const ROLES: [&str; 3] = ["entry", "middle", "exit"];
-        self.config
+        config
             .relays
             .path()
             .iter()
             .zip(ROLES)
             .enumerate()
             .map(|(index, (addr, role))| {
-                let claim = self.list.get(addr);
+                let claim = list.get(addr);
                 HopRecord {
                     index,
                     role,
@@ -547,9 +560,21 @@ impl ServeState {
     /// shows the real sequence — encrypt, spend a token, push into the entry
     /// relay — rather than a spinner and a result.
     fn send_message(&self, room: &str, peer_label: &str, content: &str) -> Result<String> {
-        let peer = self.config.peers.get(peer_label).ok_or_else(|| {
+        // CLI parity (see [`client::send`]): config, the signed relay list,
+        // the ratchet and the wallet are re-read from disk on every send,
+        // exactly like the one-shot CLI re-reads them on every invocation. A
+        // token batch re-issued while serve runs, a peer added to (or removed
+        // from) the config, or a re-fetched relay list must be honored by the
+        // next send — otherwise `/send` diverges from `warren send` and fails
+        // with a stale in-memory "out of tokens"/"unknown peer" while the
+        // CLI keeps working.
+        let config = Config::load(&self.config_path)?;
+        let list = SignedRelayList::load_and_verify(&self.relays_path)?;
+        let peer = config.peers.get(peer_label).ok_or_else(|| {
             anyhow!("unknown peer `{peer_label}` — add it under [peers] in the config")
         })?;
+        let mut ratchet = RatchetClient::load(&self.home)?;
+        let mut wallet = ClientTokenWallet::load(&self.home.join("wallet.json"))?;
 
         let id = self.new_message_id();
         let counter = self.counter.fetch_add(1, Ordering::SeqCst);
@@ -566,7 +591,7 @@ impl ServeState {
             chunks: frames.len() as u32,
             tokens_spent: 0,
             sha256: String::new(),
-            hops: self.hops(),
+            hops: self.hops(&config, &list),
             preview: preview_of(content),
             error: None,
             created_at: now,
@@ -593,25 +618,17 @@ impl ServeState {
 
         for (i, frame) in frames.iter().enumerate() {
             let plaintext = serde_json::to_string(frame)?;
-            let wire = {
-                let mut ratchet = self.ratchet.lock().expect("ratchet mutex poisoned");
-                ratchet.encrypt(&peer.id, &peer.otk, &plaintext)?
-            };
+            let wire = ratchet.encrypt(&peer.id, &peer.otk, &plaintext)?;
             digest.update(&wire);
 
-            let token = {
-                let mut wallet = self.wallet.lock().expect("wallet mutex poisoned");
-                let token = match wallet.spend_token() {
-                    Ok(token) => token,
-                    Err(e) => {
-                        drop(wallet);
-                        self.fail(&id, peer_label, room, &e.to_string(), spent);
-                        return Err(e);
-                    }
-                };
-                wallet.save(&self.home.join("wallet.json"))?;
-                token
+            let token = match wallet.spend_token() {
+                Ok(token) => token,
+                Err(e) => {
+                    self.fail(&id, peer_label, room, &e.to_string(), spent);
+                    return Err(e);
+                }
             };
+            wallet.save(&self.home.join("wallet.json"))?;
             spent += 1;
             self.emit(WireEvent {
                 ts: now_ms(),
@@ -631,9 +648,7 @@ impl ServeState {
                 ),
             });
 
-            if let Err(e) =
-                client::send_packet(&self.config, &self.list, &peer.addr, &wire, Some(&token))
-            {
+            if let Err(e) = client::send_packet(&config, &list, &peer.addr, &wire, Some(&token)) {
                 self.fail(&id, peer_label, room, &format!("{e:#}"), spent);
                 return Err(e);
             }
@@ -701,15 +716,23 @@ impl ServeState {
         });
     }
 
+    /// Our Layer-3 identity (hex), read fresh like the rest of the send path:
+    /// the account identity is stable, but there is no reason to trust a
+    /// startup snapshot for it. A missing account (deleted mid-run) yields an
+    /// empty string rather than failing the request — message ids degrade to
+    /// `wb-…` and the UI shows an empty identity, which is honest noise on a
+    /// broken setup.
+    fn identity_hex(&self) -> String {
+        RatchetClient::load(&self.home)
+            .map(|r| r.identity_hex())
+            .unwrap_or_default()
+    }
+
     /// Message ids must be unique per sender and are only ever compared for
     /// equality, so the ratchet identity plus a counter and the wall clock is
     /// enough — no extra dependency for a UUID.
     fn new_message_id(&self) -> String {
-        let identity = self
-            .ratchet
-            .lock()
-            .expect("ratchet mutex poisoned")
-            .identity_hex();
+        let identity = self.identity_hex();
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
@@ -719,10 +742,11 @@ impl ServeState {
     }
 
     fn token_count(&self) -> usize {
-        self.wallet
-            .lock()
-            .expect("wallet mutex poisoned")
-            .token_count()
+        // Fresh read from disk, so the UI never shows a startup-stale count
+        // after a re-issue or a CLI send while the daemon runs.
+        ClientTokenWallet::load(&self.home.join("wallet.json"))
+            .map(|w| w.token_count())
+            .unwrap_or(0)
     }
 }
 
@@ -817,9 +841,26 @@ fn spawn_receiver(state: Arc<ServeState>) -> Result<()> {
             let Ok(Some((net::FRAME_DELIVER, body))) = net::recv_frame(&mut stream) else {
                 continue;
             };
-            let decrypted = {
-                let mut ratchet = state.ratchet.lock().expect("ratchet mutex poisoned");
-                ratchet.decrypt(&body)
+            // CLI parity on the receive side too: re-read the ratchet from
+            // disk per delivery so sessions advanced by the CLI (or another
+            // process) while serve runs are honored — a startup snapshot
+            // would reject every message sent after it was taken.
+            let decrypted = match RatchetClient::load(&state.home) {
+                Ok(mut ratchet) => ratchet.decrypt(&body),
+                Err(_) => {
+                    state.emit(WireEvent {
+                        ts: now_ms(),
+                        node: "recipient",
+                        kind: "error",
+                        direction: "in",
+                        msg_id: String::new(),
+                        peer: String::new(),
+                        room: String::new(),
+                        state: "FAILED",
+                        detail: "no ratchet state for delivery".into(),
+                    });
+                    continue;
+                }
             };
             let Ok((sender, plaintext)) = decrypted else {
                 state.emit(WireEvent {
@@ -1235,11 +1276,7 @@ fn route(
 }
 
 fn agent_me(state: &Arc<ServeState>) -> Value {
-    let identity = state
-        .ratchet
-        .lock()
-        .expect("ratchet mutex poisoned")
-        .identity_hex();
+    let identity = state.identity_hex();
     json!({"data": {
         "identity": identity,
         "delivery_addr": state.listen_addr,

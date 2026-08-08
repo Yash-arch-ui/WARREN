@@ -14,7 +14,10 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use common::{RelayProcess, TempDir, ratchet_init, write_config, write_relay_list};
+use common::{
+    Receiver, RelayProcess, TempDir, ratchet_init, write_config, write_config_with_delay,
+    write_relay_list,
+};
 
 /// A `warren serve` child process, killed on drop.
 struct ServeProcess {
@@ -406,4 +409,101 @@ fn serve_refuses_a_non_loopback_delivery_address() {
         stderr.contains("loopback"),
         "the refusal must say why: {stderr}"
     );
+}
+
+/// Regression for the CLI-vs-serve divergence: `warren serve`'s `/send` must
+/// behave exactly like the one-shot CLI `warren send` — same wallet reads,
+/// same peer resolution, same token handling. The daemon must re-read config,
+/// the signed relay list, the ratchet and the wallet from disk on every send;
+/// a daemon spending from state loaded once at startup silently diverges from
+/// the CLI the moment anything on disk changes: a token batch re-issued while
+/// serve runs (via `warren token-issue` or the UI's Issue button) leaves the
+/// CLI able to send while `/send` fails with a stale "out of tokens".
+#[test]
+fn serve_send_re_reads_state_after_a_token_reissue_while_running() {
+    let tmp = TempDir::new("m9-reissue");
+    let entry = RelayProcess::spawn(&[]);
+    let middle = RelayProcess::spawn(&[]);
+    let exit = RelayProcess::spawn(&[]);
+
+    let (alice_home, _, _) = ratchet_init(&tmp, "alice");
+    let (bob_home, bob_id, bob_otk) = ratchet_init(&tmp, "bob");
+    let receiver = Receiver::start(&bob_home);
+    let bob_delivery = receiver.addr.clone();
+
+    // One token: enough for exactly one send before the batch is drained, so
+    // a re-issue is the only way the second send can succeed.
+    warren::api::token_issue(1, None, 0, "test-client", &alice_home).unwrap();
+
+    let relays = (
+        entry.addr.as_str(),
+        middle.addr.as_str(),
+        exit.addr.as_str(),
+    );
+    let cfg = tmp.path().join("alice.toml");
+    // delay_ms = 0 so the three sends cannot be reordered by per-hop mix
+    // delay — the test targets state freshness, not the reorder window.
+    write_config_with_delay(
+        &cfg,
+        relays,
+        &[("bob", &bob_delivery, &bob_id, &bob_otk)],
+        0,
+    );
+    write_relay_list(&alice_home.join("relays.json"), &[&entry, &middle, &exit]);
+
+    let serve = ServeProcess::spawn(
+        free_port(),
+        &format!("127.0.0.1:{}", free_port()),
+        &alice_home,
+        &cfg,
+    );
+
+    // 1. First send succeeds and drains the on-disk wallet.
+    let (s1, b1) = serve.post("/api/v1/messages", r#"{"peer":"bob","content":"first"}"#);
+    assert_eq!(s1, 200, "first send failed: {b1}");
+
+    // 2. REGRESSION (the reported divergence): a token batch is re-issued
+    // while the daemon keeps running. The very next send must spend from the
+    // NEW wallet — under the old code the daemon spent from the
+    // startup-loaded (now empty) in-memory wallet and failed with "out of
+    // tokens" while `warren send` (which reads the file fresh per invocation)
+    // kept working.
+    warren::api::token_issue(1, None, 0, "test-client", &alice_home).unwrap();
+    let (s2, b2) = serve.post(
+        "/api/v1/messages",
+        r#"{"peer":"bob","content":"after-reissue"}"#,
+    );
+    assert_eq!(s2, 200, "send after a re-issue must succeed: {b2}");
+
+    // 3. Same peer resolution: a config edit while serve runs must be picked
+    // up by the next send. Remove the peer — the daemon must refuse with
+    // "unknown peer", not keep sending from its startup snapshot.
+    write_config_with_delay(&cfg, relays, &[], 0);
+    let (s3, b3) = serve.post("/api/v1/messages", r#"{"peer":"bob","content":"no-peer"}"#);
+    assert_eq!(s3, 409, "a removed peer must be refused: {b3}");
+    assert!(
+        b3.contains("unknown peer"),
+        "the refusal must name the reason: {b3}"
+    );
+
+    // 4. Restore the peer and top up the wallet: the send works again, and
+    // the UI's status reflects the fresh on-disk wallet (0 left after this).
+    write_config_with_delay(
+        &cfg,
+        relays,
+        &[("bob", &bob_delivery, &bob_id, &bob_otk)],
+        0,
+    );
+    warren::api::token_issue(1, None, 0, "test-client", &alice_home).unwrap();
+    let (s4, b4) = serve.post("/api/v1/messages", r#"{"peer":"bob","content":"restored"}"#);
+    assert_eq!(s4, 200, "send after restoring the peer must succeed: {b4}");
+
+    let (_, status) = serve.get("/api/v1/status");
+    assert!(
+        status.contains("\"tokens\":0"),
+        "status must reflect the fresh wallet, not a startup snapshot: {status}"
+    );
+
+    // All three real sends made it through the mix path to the receiver.
+    receiver.wait_for_messages(3, Duration::from_secs(20));
 }
