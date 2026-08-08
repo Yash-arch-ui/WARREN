@@ -11,7 +11,7 @@ use std::net::{TcpListener, TcpStream};
 
 pub const FRAME_SPHINX: u8 = 0x01; // body = [u16 proof_len][proof][sphinx packet bytes]
 pub const FRAME_INFO_REQ: u8 = 0x02; // body = empty
-pub const FRAME_INFO_RESP: u8 = 0x03; // body = [u8; 32] x25519 public key
+pub const FRAME_INFO_RESP: u8 = 0x03; // body = relay's self-signed claim (canonical ‖ 64-byte ed25519 sig)
 pub const FRAME_DELIVER: u8 = 0x04; // relay -> client: body = plaintext message
 
 /// Hard cap on frame size. A Sphinx packet is a fixed 1024-byte payload plus

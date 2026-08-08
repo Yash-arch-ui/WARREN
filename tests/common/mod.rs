@@ -44,6 +44,8 @@ pub struct RelayProcess {
     child: Child,
     pub addr: String,
     pub pubkey_hex: String,
+    /// The relay's self-signed claim, captured from its startup output.
+    pub claim: unlink::directory::RelayClaim,
     logs: mpsc::Receiver<String>,
     history: Arc<Mutex<Vec<String>>>,
 }
@@ -78,22 +80,42 @@ impl RelayProcess {
         });
 
         let deadline = Instant::now() + Duration::from_secs(20);
+        let mut addr = String::new();
+        let mut pubkey_hex = String::new();
+        let mut claim = None;
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
             match rx.recv_timeout(remaining) {
                 Ok(line) if line.contains("listening on") => {
                     let rest = line.split("listening on ").nth(1).unwrap();
-                    let (addr, pubkey_hex) = rest.split_once(" pubkey ").unwrap();
-                    return RelayProcess {
-                        child,
-                        addr: addr.to_string(),
-                        pubkey_hex: pubkey_hex.to_string(),
-                        logs: rx,
-                        history,
-                    };
+                    let (a, pk) = rest.split_once(" sphinx=").unwrap();
+                    addr = a.to_string();
+                    pubkey_hex = pk.trim().to_string();
+                }
+                Ok(line) if line.starts_with("relay claim: ") => {
+                    let json = line.trim_start_matches("relay claim: ");
+                    claim = Some(unlink::directory::RelayClaim::from_json_str(json).unwrap());
                 }
                 Ok(_) => {}
-                Err(_) => panic!("relay did not report 'listening on' within 20s"),
+                Err(_) => {
+                    // Reap the child before panicking so the timeout path
+                    // does not leave a zombie relay process behind.
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    panic!("relay did not report 'listening on' + 'relay claim' within 20s");
+                }
+            }
+            if !addr.is_empty()
+                && let Some(claim) = claim
+            {
+                return RelayProcess {
+                    child,
+                    addr,
+                    pubkey_hex,
+                    claim,
+                    logs: rx,
+                    history,
+                };
             }
         }
     }
@@ -189,6 +211,14 @@ pub fn write_config(path: &Path, relays: (&str, &str, &str), peers: &[(&str, &st
         s.push_str(&format!("{k} = \"{v}\"\n"));
     }
     std::fs::write(path, s).unwrap();
+}
+
+/// Write a signed gossip list from relay claims (the client's trust anchor).
+pub fn write_relay_list(path: &Path, relays: &[&RelayProcess]) {
+    let claims: Vec<unlink::directory::RelayClaim> =
+        relays.iter().map(|r| r.claim.clone()).collect();
+    let list = unlink::directory::SignedRelayList::from_claims(claims);
+    list.save(path).unwrap();
 }
 
 /// Run `unlink send <peer> <msg> --home <home> --config <config>`.

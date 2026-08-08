@@ -8,8 +8,9 @@ use unlink::{client, config, credential, relay};
 /// UNLINK — a minimal CLI client for a mixnet-routed messenger.
 ///
 /// M1: real 3-hop Sphinx routing over local TCP. M2: blind-signature
-/// admission tokens. Directory/gossip discovery and Double Ratchet content
-/// encryption are still out of scope.
+/// admission tokens. M3: signed relay claims + verified gossip list (real
+/// gossip *propagation* is M5+, per spec §5.4). Double Ratchet content
+/// encryption is still out of scope.
 #[derive(Parser)]
 #[command(name = "unlink", version, about, arg_required_else_help = true)]
 struct Cli {
@@ -43,6 +44,19 @@ enum Command {
         home: Option<PathBuf>,
         #[arg(long)]
         config: Option<PathBuf>,
+        /// Signed gossip list (default <home>/relays.json)
+        #[arg(long)]
+        relays: Option<PathBuf>,
+    },
+    /// Assemble a signed relay list from live relays (first-use bootstrap)
+    DirectoryFetch {
+        /// Relay addresses to query, e.g. 127.0.0.1:7001
+        relays: Vec<String>,
+        /// Write the verified list here (default <home>/relays.json)
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        home: Option<PathBuf>,
     },
     /// Listen for messages delivered to this client
     Listen {
@@ -92,12 +106,31 @@ fn run(cmd: Command) -> anyhow::Result<String> {
             msg,
             home,
             config,
-        } => client::send(
-            &peer,
-            &msg,
-            &home.unwrap_or_else(config::unlink_home),
-            &config.unwrap_or_else(config::config_path),
-        ),
+            relays,
+        } => {
+            let home = home.unwrap_or_else(config::unlink_home);
+            let relays = relays.unwrap_or_else(|| client::relays_path(&home));
+            client::send(
+                &peer,
+                &msg,
+                &home,
+                &config.unwrap_or_else(config::config_path),
+                &relays,
+            )
+        }
+
+        Command::DirectoryFetch { relays, out, home } => {
+            let home = home.unwrap_or_else(config::unlink_home);
+            let out = out.unwrap_or_else(|| client::relays_path(&home));
+            let addrs: Vec<&str> = relays.iter().map(String::as_str).collect();
+            let list = unlink::directory::fetch_claims_from(&addrs)?;
+            list.save(&out)?;
+            Ok(format!(
+                "verified {} relay claim(s) → {}",
+                list.entries.len(),
+                out.display()
+            ))
+        }
 
         Command::Listen { addr } => client::listen(&addr),
 
@@ -110,7 +143,7 @@ fn run(cmd: Command) -> anyhow::Result<String> {
         } => {
             if !start {
                 anyhow::bail!(
-                    "`unlink relay` requires `--start` (relay subcommands land with directory/gossip, M-later)"
+                    "`unlink relay` requires `--start` (relay subcommands land with gossip propagation, M5+)"
                 )
             }
             let epoch = epoch.map(credential::Epoch);

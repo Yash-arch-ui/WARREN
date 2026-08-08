@@ -1,12 +1,16 @@
 # Library selection
 
-Two cryptographic dependencies, chosen with the same evidence standard:
+Three cryptographic dependencies, chosen with the same evidence standard:
 
 1. **§1 — Sphinx mix packets (M0/M1):** [`sphinx-packet`](https://crates.io/crates/sphinx-packet)
    (Nymtech, Apache-2.0, v0.7.0). The project language is therefore **Rust**.
 2. **§2 — Blind-signature admission tokens (M2):**
    [`blind-rsa-signatures`](https://crates.io/crates/blind-rsa-signatures)
    (jedisct1, MIT, v0.17.2) — RFC 9474, the Privacy Pass v1 primitive.
+3. **§4 — Relay long-term identity signing (M3):**
+   [`ed25519-dalek`](https://crates.io/crates/ed25519-dalek)
+   (Dalek team, BSD-3-Clause/Apache-2.0, v2.1) — RFC 8032, the natural
+   pairing with the existing `x25519-dalek` keys.
 
 ---
 
@@ -216,3 +220,58 @@ crate exists, is mature, and is the reference implementation.
   ahead of the mix-wrapped packet in the frame, so the entry relay checks it
   **without unwrapping any mix layer** (spec §3.2 "Layer 2 position" —
   interpretation documented in `docs/THREAT_MODEL.md` §4).
+
+---
+
+# §4 Ed25519 for relay long-term identity signing
+
+**Decision: reuse [`ed25519-dalek`](https://crates.io/crates/ed25519-dalek)**
+(Dalek cryptography team), pinned at **`2.1`** in `Cargo.toml`.
+
+## Why this one
+
+| Attribute       | Value (verified 2026-08-08)                                |
+|-----------------|-------------------------------------------------------------|
+| Latest version  | `2.1`                                                       |
+| License         | **BSD-3-Clause** (dual-licensed BSD-3 / Apache-2.0)         |
+| Repo            | `github.com/dalek-cryptography/curve25519-dalek` (not archived) |
+| Downloads       | **30M+**                                                     |
+| Scheme          | RFC 8032 Ed25519 (EdDSA over Curve25519)                    |
+| Security review | The standard Rust ed25519 implementation; used across the RustCrypto / dalek ecosystem |
+
+**Why Ed25519 is the natural pairing with x25519.** The relays already use
+`x25519-dalek` for Sphinx per-hop keys (M1), and both schemes live on the
+same Curve25519 group with the same 32-byte public-key size — one curve,
+one mental model, one 32-byte key field in our wire format (the Sphinx
+header fields are already 32 bytes, so an identity pubkey fits the same
+encoding). Ed25519 is the RFC 8032 standard for exactly this job:
+sign-verify a short fixed-format message (a relay's claim) with no
+interactive setup and a compact 64-byte signature.
+
+**Why not the alternatives:**
+
+- `ed25519-dalek 2.x` (selected) vs **1.x**: 2.x is the current maintained
+  line (1.x is deprecated upstream); 2.x also aligns with the dalek
+  `curve25519-dalek` that `x25519-dalek 3` already pulls in.
+- **RSA / P-256 (ECDSA)**: require ASN.1/DER key handling and bigger
+  signatures; ECDSA needs a nonce (r, s) format that is less natural for a
+  64-byte fixed wire field than Ed25519's (R, S).
+- **BLS**: pairing-based, no maintained Rust crate with a simple sign/verify
+  API in our dependency tree; overkill for self-signed relay metadata.
+- **Hand-rolling anything**: signing relay claims is exactly the
+  don't-implement-crypto-yourself territory the project already avoids (§1,
+  §2); `ed25519-dalek` is a maintained, audited primitive.
+
+## How it is used (M3)
+
+- **`src/directory.rs`**: `RelayClaim` — `(address, sphinx_pubkey,
+  identity_pubkey)` self-signed with the relay's long-term ed25519 key over
+  a canonical byte encoding; `SignedRelayList` bundles per-relay claims for
+  the client's gossip list. Verification is `verify_strict` (RFC 8032
+  strict rules — small-order/re-encoded points rejected).
+- **`src/relay.rs`**: each relay loads (or generates) a 64-byte key file
+  `[x25519 secret 32][ed25519 secret 32]`; the 32-byte M1/M2-era format is
+  auto-migrated. The claim is served over the `FRAME_INFO_REQ` handshake.
+- **`src/client.rs`**: the client verifies the live handshake claim's
+  signature and cross-checks identity + sphinx keys against its verified
+  gossip list before building the Sphinx route (spec §8.5).

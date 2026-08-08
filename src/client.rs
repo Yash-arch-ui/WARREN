@@ -1,17 +1,18 @@
 //! Client module — the user-facing side of UNLINK.
 //!
-//! M1/M2 status:
+//! M1–M3 status:
 //! - `keygen` — real x25519 identity keypair, persisted 0600.
-//! - `send`   — real 3-hop path selection (hardcoded/config relay list; no
-//!   directory/gossip yet), Sphinx packet construction via `sphinx-packet`,
-//!   M2 admission proof attached ahead of the mix layers, transmission to the
-//!   entry relay over plain TCP.
+//! - `send`   — real 3-hop path selection (config addresses), **signed gossip
+//!   list verification** (`directory::SignedRelayList`), signed-handshake
+//!   verification with cross-check against the list (spec §8.5), Sphinx
+//!   packet construction via `sphinx-packet`, M2 admission proof, plain-TCP
+//!   transmission to the entry relay.
 //! - `listen` — receive loop for messages delivered by the exit relay.
 //!
 //! Double Ratchet content encryption is still out of scope (Sphinx wrapping
 //! is the message body for now).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
 use sphinx_packet::SphinxPacket;
@@ -23,6 +24,7 @@ use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::config::Config;
 use crate::credential::{ClientTokenWallet, Token};
+use crate::directory::{RelayClaim, SignedRelayList};
 use crate::net;
 
 pub const PATH_LEN: usize = 3;
@@ -30,8 +32,14 @@ pub const PATH_LEN: usize = 3;
 /// 1 padding marker) minus our 2-byte length prefix.
 pub const MAX_MSG_LEN: usize = PAYLOAD_SIZE - PAYLOAD_OVERHEAD_SIZE - 2;
 
-/// Generate and persist an identity keypair (x25519). ed25519 identity keys
-/// for signing/peer IDs are deferred (M-later, with Double Ratchet).
+/// Default location of the signed gossip list for a data dir.
+pub fn relays_path(home: &Path) -> PathBuf {
+    home.join("relays.json")
+}
+
+/// Generate and persist an identity keypair (x25519). (ed25519 identity keys
+/// exist on relays for claim signing since M3; client-side signing keys land
+/// with Double Ratchet, M-later.)
 pub fn keygen(home: &Path) -> Result<String> {
     let sk = StaticSecret::random();
     let pk = PublicKey::from(&sk);
@@ -46,7 +54,13 @@ pub fn keygen(home: &Path) -> Result<String> {
 
 /// CLI send path: load wallet, spend exactly one token (clean error when out
 /// of tokens), and push a proof-carrying packet into the entry relay.
-pub fn send(peer: &str, msg: &str, home: &Path, config_path: &Path) -> Result<String> {
+pub fn send(
+    peer: &str,
+    msg: &str,
+    home: &Path,
+    config_path: &Path,
+    relays_path: &Path,
+) -> Result<String> {
     // Validate the message BEFORE spending a token: an empty or oversized
     // message must not burn a token.
     if msg.is_empty() {
@@ -67,11 +81,20 @@ pub fn send(peer: &str, msg: &str, home: &Path, config_path: &Path) -> Result<St
         )
     })?;
 
+    // The signed gossip list is the client's trust anchor (spec §5.4): every
+    // entry must carry a valid self-signature, or the send is refused.
+    let list = SignedRelayList::load_and_verify(relays_path)?;
+
+    // Verify the path BEFORE spending a token: a relay substitution, a MITM
+    // injecting its own keys, or a stale list must refuse the send without
+    // burning an admission token (spec §8.5).
+    let sphinx_keys = resolve_verified_path(&cfg.relays.path(), &list)?;
+
     let mut wallet = load_wallet(home)?;
     let token = wallet.spend_token()?; // clean "out of tokens" error
     wallet.save(&home.join("wallet.json"))?;
 
-    send_packet(&cfg, receiver, msg, Some(&token))?;
+    transmit_packet(&cfg, receiver, msg, Some(&token), &sphinx_keys)?;
     Ok(format!(
         "sent {} B to {peer} (token epoch {}) via {} → {} → {}",
         msg.len(),
@@ -96,7 +119,20 @@ fn load_wallet(home: &Path) -> Result<ClientTokenWallet> {
 /// Core send: build a 3-hop Sphinx packet for `receiver` and push it into the
 /// entry relay. `proof = Some(token)` attaches the M2 admission proof ahead
 /// of the mix layers; relays without admission config ignore it.
-pub fn send_packet(cfg: &Config, receiver: &str, msg: &str, proof: Option<&Token>) -> Result<()> {
+///
+/// Trust flow (spec §8.5): for each relay on the path the client (1) looks up
+/// the verified gossip-list entry for that address, (2) fetches the relay's
+/// live self-signed claim over the handshake, (3) verifies the claim's
+/// signature, and (4) cross-checks identity + sphinx keys against the list.
+/// Any mismatch — a substituted relay, a MITM injecting its own key, a stale
+/// list — aborts the send with a clean error.
+pub fn send_packet(
+    cfg: &Config,
+    list: &SignedRelayList,
+    receiver: &str,
+    msg: &str,
+    proof: Option<&Token>,
+) -> Result<()> {
     if msg.len() > MAX_MSG_LEN {
         anyhow::bail!(
             "message too long: {} B (max {MAX_MSG_LEN} B inside the 1024-B Sphinx payload)",
@@ -108,11 +144,25 @@ pub fn send_packet(cfg: &Config, receiver: &str, msg: &str, proof: Option<&Token
     }
 
     let relays = cfg.relays.path();
-    let pks = fetch_relay_pubkeys(&relays)?;
+    let sphinx_keys = resolve_verified_path(&relays, list)?;
+    transmit_packet(cfg, receiver, msg, proof, &sphinx_keys)
+}
 
+/// Build the 3-hop Sphinx packet with the already-verified sphinx keys and
+/// push it into the entry relay. `proof = Some(token)` attaches the M2
+/// admission proof ahead of the mix layers; relays without admission config
+/// ignore it.
+fn transmit_packet(
+    cfg: &Config,
+    receiver: &str,
+    msg: &str,
+    proof: Option<&Token>,
+    sphinx_keys: &[PublicKey; PATH_LEN],
+) -> Result<()> {
+    let relays = cfg.relays.path();
     let route: Vec<Node> = relays
         .iter()
-        .zip(pks.iter())
+        .zip(sphinx_keys.iter())
         .map(|(addr, pk)| {
             Node::new(
                 NodeAddressBytes::from_bytes(net::addr_to_field(addr).unwrap()),
@@ -154,23 +204,57 @@ pub fn send_packet(cfg: &Config, receiver: &str, msg: &str, proof: Option<&Token
     Ok(())
 }
 
-/// Ask each relay for its x25519 public key (the stand-in for directory /
-/// gossip discovery, out of scope for M1/M2).
-fn fetch_relay_pubkeys(addrs: &[&str; 3]) -> Result<[PublicKey; 3]> {
-    let mut keys: Vec<PublicKey> = Vec::with_capacity(addrs.len());
+/// Resolve the path's relays against the verified gossip list: handshake each
+/// relay, verify its self-signed claim, and cross-check identity + sphinx
+/// keys against the list entry for that address. Returns the sphinx public
+/// keys to build the route with.
+fn resolve_verified_path(addrs: &[&str; 3], list: &SignedRelayList) -> Result<[PublicKey; 3]> {
+    let mut sphinx_keys = Vec::with_capacity(addrs.len());
     for addr in addrs {
-        let mut stream = net::connect(addr)?;
-        net::send_frame(&mut stream, net::FRAME_INFO_REQ, &[])?;
-        let (ty, body) = net::recv_frame(&mut stream)?
-            .ok_or_else(|| anyhow!("relay {addr} closed without responding"))?;
-        if ty != net::FRAME_INFO_RESP || body.len() != 32 {
-            anyhow::bail!("unexpected info response from {addr}");
+        let expected = list.get(addr).ok_or_else(|| {
+            anyhow!(
+                "relay {addr} is not in the verified relay list — re-run \
+                 `unlink directory-fetch` (or check the gossip list)"
+            )
+        })?;
+        // The relay's live claim must be a valid self-signature AND match the
+        // pinned identity/sphinx keys from the list.
+        let live = fetch_and_verify_claim(addr)?;
+        if live.identity_pubkey != expected.identity_pubkey {
+            anyhow::bail!(
+                "relay {addr} identity mismatch between handshake and relay list — \
+                 possible relay substitution / poisoned list (spec §8.5); refusing to send"
+            );
         }
-        let arr: [u8; 32] = body.try_into().unwrap();
-        keys.push(PublicKey::from(arr));
+        if live.sphinx_pubkey != expected.sphinx_pubkey {
+            anyhow::bail!(
+                "relay {addr} sphinx key mismatch between handshake and relay list — \
+                 stale list? re-run `unlink directory-fetch`"
+            );
+        }
+        sphinx_keys.push(PublicKey::from(expected.sphinx_pubkey));
     }
-    keys.try_into()
+    sphinx_keys
+        .try_into()
         .map_err(|_| anyhow!("expected exactly {PATH_LEN} relay public keys"))
+}
+
+/// Handshake a relay and return its claim, verifying the self-signature.
+/// An unsigned or tampered claim is rejected here — the client never trusts
+/// a raw pubkey off the wire.
+pub fn fetch_and_verify_claim(addr: &str) -> Result<RelayClaim> {
+    let mut stream = net::connect(addr)?;
+    net::send_frame(&mut stream, net::FRAME_INFO_REQ, &[])?;
+    let (ty, body) = net::recv_frame(&mut stream)?
+        .ok_or_else(|| anyhow!("relay {addr} closed without responding"))?;
+    if ty != net::FRAME_INFO_RESP {
+        anyhow::bail!("unexpected frame type {ty} from {addr}");
+    }
+    let claim = RelayClaim::from_wire(&body)?;
+    claim
+        .verify()
+        .map_err(|e| anyhow!("relay {addr} returned an unsigned/invalid claim: {e}"))?;
+    Ok(claim)
 }
 
 /// Receive loop for a client: prints messages delivered by the exit relay.
@@ -337,6 +421,41 @@ mod tests {
             },
             peers: Default::default(),
         };
-        assert!(send_packet(&cfg, "127.0.0.1:1", "", None).is_err());
+        // The empty-message check runs before any network/list lookup.
+        assert!(send_packet(&cfg, &SignedRelayList::default(), "127.0.0.1:1", "", None).is_err());
+    }
+
+    /// A fake relay endpoint serving a claim over the handshake, so the
+    /// client's handshake verification is unit-testable without processes.
+    fn serve_claim_over_handshake(claim_bytes: Vec<u8>) -> String {
+        let (listener, addr) = net::bind_any().unwrap();
+        std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            // Expect the INFO_REQ, then answer with the claim wire bytes.
+            let _ = net::recv_frame(&mut s);
+            let _ = net::send_frame(&mut s, net::FRAME_INFO_RESP, &claim_bytes);
+        });
+        addr
+    }
+
+    #[test]
+    fn handshake_claim_verified_and_parsed() {
+        let sk = ed25519_dalek::SigningKey::from_bytes(&rand::random::<[u8; 32]>());
+        let claim = crate::directory::sign_claim("127.0.0.1:7001", [9u8; 32], &sk);
+        let addr = serve_claim_over_handshake(claim.to_wire());
+        let got = fetch_and_verify_claim(&addr).unwrap();
+        assert_eq!(got, claim);
+        assert_eq!(got.identity_pubkey, sk.verifying_key().to_bytes());
+    }
+
+    #[test]
+    fn handshake_unsigned_claim_rejected() {
+        // An unsigned / garbage claim body must be rejected, never trusted.
+        let addr = serve_claim_over_handshake(vec![0xde; 40]);
+        let err = fetch_and_verify_claim(&addr).unwrap_err().to_string();
+        assert!(
+            err.contains("unsigned/invalid claim") || err.contains("too short"),
+            "got: {err}"
+        );
     }
 }

@@ -41,6 +41,11 @@ fn three_hop_routing_delivers_and_no_relay_sees_sender_and_receiver() {
     wallet.request_batch(&issuer, 1).unwrap();
     wallet.save(&home.join("wallet.json")).unwrap();
 
+    // The signed gossip list is the client's trust anchor: the client
+    // verifies every entry's self-signature and cross-checks live handshake
+    // claims against it. A valid list must be accepted and used for routing.
+    write_relay_list(&home.join("relays.json"), &[&entry, &middle, &exit]);
+
     let out = run_send(&home, &cfg_path, "bob", "hello from alice");
     assert!(
         out.status.success(),

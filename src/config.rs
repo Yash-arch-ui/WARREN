@@ -1,6 +1,7 @@
-//! Client configuration: the hardcoded M1/M2 relay path and peer→delivery
-//! address map. Directory/gossip discovery is out of scope for M1/M2, so the
-//! client reads a small TOML file instead.
+//! Client configuration: the relay path and peer→delivery address map. Path
+//! *selection* stays a small TOML file (real gossip propagation is M5+); the
+//! trust anchor for those addresses is the signed relay list
+//! (`directory::SignedRelayList`, verified in `client::send`).
 //!
 //! ```toml
 //! [relays]

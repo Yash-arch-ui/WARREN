@@ -75,6 +75,9 @@ fn valid_token_message_passes_through() {
         &receiver.addr,
     );
     let (home, _wallet) = home_with_wallet(&tmp, &issuer, 10);
+    // The signed gossip list is the client's trust anchor (spec §5.4):
+    // without a valid list the send is refused before the admission gate.
+    write_relay_list(&home.join("relays.json"), &[&entry, &middle, &exit]);
 
     let out = run_send(&home, &cfg_path, "bob", "hello admission");
     assert!(
@@ -104,6 +107,7 @@ fn replayed_token_is_dropped_by_relay() {
         &receiver.addr,
     );
     let (home, wallet) = home_with_wallet(&tmp, &issuer, 2);
+    write_relay_list(&home.join("relays.json"), &[&entry, &middle, &exit]);
 
     // The CLI pops the *last* token from the wallet file; record it so we can
     // replay it.
@@ -117,8 +121,12 @@ fn replayed_token_is_dropped_by_relay() {
     );
 
     // Craft a frame with the exact same token and push it at the entry relay.
+    // The crafted send runs the full verification path (signed list + live
+    // handshake cross-check) before reaching the admission gate.
     let cfg = Config::load(&cfg_path).unwrap();
-    client::send_packet(&cfg, &receiver.addr, "replay", Some(&spent_token)).unwrap();
+    let list =
+        unlink::directory::SignedRelayList::load_and_verify(&home.join("relays.json")).unwrap();
+    client::send_packet(&cfg, &list, &receiver.addr, "replay", Some(&spent_token)).unwrap();
 
     // Block on the relay's drop decision first (deterministic), then assert
     // nothing was delivered.
@@ -146,8 +154,11 @@ fn out_of_tokens_fails_cleanly_and_relay_survives() {
         &receiver.addr,
     );
 
-    // Empty wallet (0 tokens): `unlink send` must fail cleanly.
+    // Empty wallet (0 tokens): `unlink send` must fail cleanly. (The signed
+    // list must be present and valid, or the send would fail earlier on
+    // list verification instead of on the wallet.)
     let (home, wallet) = home_with_wallet(&tmp, &issuer, 0);
+    write_relay_list(&home.join("relays.json"), &[&entry, &middle, &exit]);
     assert!(wallet.is_empty());
     drop(wallet);
 
@@ -175,6 +186,7 @@ fn no_correlatable_identifier_across_redemptions() {
         &receiver.addr,
     );
     let (home, wallet) = home_with_wallet(&tmp, &issuer, 3);
+    write_relay_list(&home.join("relays.json"), &[&entry, &middle, &exit]);
     let initial: Vec<Token> = wallet.unspent_tokens().to_vec();
 
     // Two messages from the same client (same batch) spend two tokens.

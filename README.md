@@ -2,10 +2,12 @@
 
 A minimal CLI client for a mixnet-routed messenger.
 
-**Current milestone: M2.** Real 3-hop Sphinx routing over local TCP (M1) and
-reputation-gated admission with blind-signature tokens (M2) are implemented
-and tested. Still out of scope: directory/gossip relay discovery, Double
-Ratchet content encryption, transport obfuscation, timing mixing.
+**Current milestone: M3.** Real 3-hop Sphinx routing over local TCP (M1),
+reputation-gated admission with blind-signature tokens (M2), and a signed
+relay/gossip list with per-relay self-signed claims verified by the client
+(M3) are implemented and tested. Still out of scope: real gossip
+*propagation* (M5+), a separate directory authority, Double Ratchet content
+encryption, transport obfuscation, timing mixing.
 
 ## Why Rust
 
@@ -38,6 +40,9 @@ exit   = "127.0.0.1:7003"
 bob = "127.0.0.1:9001"
 EOF
 
+# Terminal 4: build the signed gossip list from the live relays (M3)
+$ unlink directory-fetch 127.0.0.1:7001 127.0.0.1:7002 127.0.0.1:7003
+
 # Terminal 5: bob listens; Terminal 4: send through the mix
 $ unlink listen 127.0.0.1:9001
 $ unlink send bob "hello through three relays"
@@ -47,18 +52,25 @@ Admission gate (drop token-less/expired/replayed traffic at the entry relay):
 restart the entry relay with `--admit-key ~/.unlink/issuer.pub --epoch <n>`
 where `<n>` matches the epoch used by `token-issue`.
 
+`send` refuses to transmit unless every relay on the path appears in
+`~/.unlink/relays.json` with a valid self-signature (spec §5.4/§8.5): run
+`unlink directory-fetch` once per relay set, and re-run it if a relay
+rotates its keys.
+
 ## CLI
 
 | Command                              | Status |
 |--------------------------------------|--------|
 | `unlink keygen`                      | x25519 identity keypair (0600 file) |
 | `unlink token-issue [--count N]`     | issue a blind-token batch (M2 dev tool) |
-| `unlink send <peer> <msg>`           | spend one token, build a 3-hop Sphinx packet, send via entry relay |
+| `unlink directory-fetch <addr>...`   | assemble a verified signed relay list from live relays (M3) |
+| `unlink send <peer> <msg>`           | spend one token, build a 3-hop Sphinx packet, verify signed list + handshake claims, send via entry relay |
 | `unlink relay --start --port P`      | mix relay: unwrap-and-forward over TCP; `--admit-key`/`--epoch` enable the M2 gate |
 | `unlink listen <addr:port>`          | receive messages delivered by the exit relay |
 
 All file-touching commands take `--home <dir>` (default `$UNLINK_HOME` or
-`~/.unlink`); `send` also takes `--config <path>`.
+`~/.unlink`); `send` also takes `--config <path>` and `--relays <path>`
+(default `<home>/relays.json`).
 
 ## Project layout
 
@@ -67,8 +79,8 @@ src/
   main.rs       # clap CLI dispatch
   lib.rs        # module map
   client.rs     # keygen, path fetch, Sphinx packet build, send+proof, listen
-  relay.rs      # unwrap-and-forward loop + admission gate
-  directory.rs  # signed relay list fetch + verify (stub; M-later)
+  relay.rs      # unwrap-and-forward loop + admission gate + signed identity claim
+  directory.rs  # signed relay claims + gossip list verify (M3)
   credential.rs # blind-signature tokens: issuer / wallet / relay admission
   net.rs        # plain-TCP framing (transport obfuscation is M-later)
   config.rs     # client TOML config (relay path + peers)
@@ -76,8 +88,9 @@ tests/
   cli_smoke.rs        # CLI-level smoke tests
   m1_routing.rs       # 3 real relays: delivery + no relay sees sender & receiver
   m2_admission.rs     # valid / replay / out-of-tokens / unlinkability over the wire
+  m3_directory.rs     # signed list: valid routing + unsigned/tampered/forged rejection
 docs/
-  LIBRARY_SELECTION.md  # sphinx-packet (§1) + blind-rsa-signatures (§2) decisions
+  LIBRARY_SELECTION.md  # sphinx-packet (§1) + blind-rsa-signatures (§2) + ed25519 (§4)
   THREAT_MODEL.md       # adversary model, credential guarantees, MVP non-goals
 .github/workflows/ci.yml # fmt + clippy + test
 ```
@@ -85,7 +98,7 @@ docs/
 ## Test
 
 ```console
-$ cargo test          # 29 tests: crypto units, CLI smoke, 3-hop + admission integration
+$ cargo test          # crypto units, CLI smoke, 3-hop + admission + directory integration
 $ cargo clippy --all-targets -- -D warnings
 ```
 

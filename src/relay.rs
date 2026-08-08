@@ -27,29 +27,53 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Result, anyhow};
+use ed25519_dalek::SigningKey;
 use sphinx_packet::SphinxPacket;
 use sphinx_packet::constants::SECURITY_PARAMETER;
 use sphinx_packet::packet::ProcessedPacketData;
 use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::credential::{AdmissionDecision, RelayAdmission};
+use crate::directory::{self, RelayClaim};
 use crate::net;
 
-/// Run the relay loop. Blocks forever. Prints a single machine-readable
-/// `unlink relay listening on <addr> pubkey <hex>` line once bound (used by
-/// tests and by operators to fetch relay public keys).
+/// A relay's two key roles: the per-session x25519 Sphinx key and the
+/// long-term ed25519 identity key that signs its claim (see
+/// `docs/LIBRARY_SELECTION.md` §4 and `docs/THREAT_MODEL.md` §2.E).
+pub struct RelayKeys {
+    pub sphinx_sk: StaticSecret,
+    pub sphinx_pk: PublicKey,
+    pub identity_sk: SigningKey,
+    pub identity_pk: [u8; 32],
+}
+
+/// Run the relay loop. Blocks forever. Prints a machine-readable startup
+/// block once bound:
+///
+/// ```text
+/// unlink relay listening on <addr> sphinx=<hex64> identity=<hex64>
+/// relay claim: <json>
+/// ```
+///
+/// The claim line is the relay's self-signed metadata; clients assemble it
+/// into a gossip list (see `unlink directory-fetch`).
 pub fn start(
     port: u16,
     key_path: Option<&Path>,
     admission: Option<Arc<Mutex<RelayAdmission>>>,
 ) -> Result<()> {
-    let (sk, pk) = load_or_generate_key(key_path)?;
+    let keys = load_or_generate_keys(key_path)?;
     let listener = TcpListener::bind(("127.0.0.1", port))?;
     let actual = listener.local_addr()?.to_string();
+
+    // Self-sign the claim once, at startup, over the *actual* bound address.
+    let claim = directory::sign_claim(&actual, *keys.sphinx_pk.as_bytes(), &keys.identity_sk);
     println!(
-        "unlink relay listening on {actual} pubkey {}",
-        hex::encode(pk.as_bytes())
+        "unlink relay listening on {actual} sphinx={} identity={}",
+        hex::encode(keys.sphinx_pk.as_bytes()),
+        hex::encode(keys.identity_pk)
     );
+    println!("relay claim: {}", claim.to_json_string()?);
 
     for stream in listener.incoming() {
         let stream = match stream {
@@ -59,9 +83,10 @@ pub fn start(
                 continue;
             }
         };
-        let sk = sk.clone();
+        let sk = keys.sphinx_sk.clone();
+        let claim = claim.clone();
         let admission = admission.clone();
-        std::thread::spawn(move || handle_connection(stream, &sk, &pk, admission));
+        std::thread::spawn(move || handle_connection(stream, &sk, &claim, admission));
     }
     Ok(())
 }
@@ -69,7 +94,7 @@ pub fn start(
 fn handle_connection(
     mut stream: TcpStream,
     sk: &StaticSecret,
-    pk: &PublicKey,
+    claim: &RelayClaim,
     admission: Option<Arc<Mutex<RelayAdmission>>>,
 ) {
     let frame = match net::recv_frame(&mut stream) {
@@ -82,7 +107,10 @@ fn handle_connection(
     };
     match frame.0 {
         net::FRAME_INFO_REQ => {
-            let _ = net::send_frame(&mut stream, net::FRAME_INFO_RESP, pk.as_bytes());
+            // The handshake returns the self-signed claim (canonical bytes +
+            // signature) — clients verify it and cross-check against their
+            // gossip list instead of trusting a raw pubkey (spec §8.5).
+            let _ = net::send_frame(&mut stream, net::FRAME_INFO_RESP, &claim.to_wire());
         }
         net::FRAME_SPHINX => handle_sphinx(stream, sk, admission, &frame.1),
         other => println!("error: unknown frame type {other}"),
@@ -225,28 +253,59 @@ fn parse_payload(payload: &[u8]) -> Vec<u8> {
     payload[msg_start..msg_start + len].to_vec()
 }
 
-fn load_or_generate_key(key_path: Option<&Path>) -> Result<(StaticSecret, PublicKey)> {
+/// Load or generate the relay keypair file: `[x25519 secret 32][ed25519
+/// secret 32]` (64 bytes, 0600). An old 32-byte file (x25519 only, from
+/// M1/M2) is migrated by generating the ed25519 identity key and rewriting.
+fn load_or_generate_keys(key_path: Option<&Path>) -> Result<RelayKeys> {
     let path = match key_path {
         Some(p) => p.to_path_buf(),
         None => crate::config::unlink_home().join("relay.key"),
     };
-    if path.exists() {
+
+    let (sphinx_sk, identity_sk) = if path.exists() {
         let raw = std::fs::read(&path)?;
-        if raw.len() != 32 {
-            return Err(anyhow!(
-                "bad relay key file `{}` (expected 32 bytes)",
-                path.display()
-            ));
+        match raw.len() {
+            64 => {
+                let sphinx_sk = StaticSecret::from(<[u8; 32]>::try_from(&raw[0..32]).unwrap());
+                let identity_sk =
+                    SigningKey::from_bytes(&<[u8; 32]>::try_from(&raw[32..64]).unwrap());
+                (sphinx_sk, identity_sk)
+            }
+            // M1/M2 key files were x25519-only (32 bytes); keep the Sphinx
+            // key and mint a fresh long-term identity.
+            32 => {
+                let sphinx_sk = StaticSecret::from(<[u8; 32]>::try_from(raw.as_slice()).unwrap());
+                let identity_sk = SigningKey::from_bytes(&rand::random::<[u8; 32]>());
+                (sphinx_sk, identity_sk)
+            }
+            other => {
+                return Err(anyhow!(
+                    "bad relay key file `{}` (expected 64 bytes, found {other})",
+                    path.display()
+                ));
+            }
         }
-        let sk = StaticSecret::from(<[u8; 32]>::try_from(raw.as_slice()).unwrap());
-        let pk = PublicKey::from(&sk);
-        Ok((sk, pk))
     } else {
-        let sk = StaticSecret::random();
-        let pk = PublicKey::from(&sk);
-        crate::credential::write_private(&path, &sk.to_bytes())?;
-        Ok((sk, pk))
-    }
+        let sphinx_sk = StaticSecret::random();
+        let identity_sk = SigningKey::from_bytes(&rand::random::<[u8; 32]>());
+        (sphinx_sk, identity_sk)
+    };
+
+    let sphinx_pk = PublicKey::from(&sphinx_sk);
+    let identity_pk = identity_sk.verifying_key().to_bytes();
+
+    // Persist (also on migration) so identity is stable across restarts.
+    let mut file = Vec::with_capacity(64);
+    file.extend_from_slice(&sphinx_sk.to_bytes());
+    file.extend_from_slice(&identity_sk.to_bytes());
+    crate::credential::write_private(&path, &file)?;
+
+    Ok(RelayKeys {
+        sphinx_sk,
+        sphinx_pk,
+        identity_sk,
+        identity_pk,
+    })
 }
 
 #[cfg(test)]
@@ -254,13 +313,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn key_generates_and_reloads() {
+    fn keys_generate_reload_and_stay_stable() {
         let path = std::env::temp_dir().join(format!("unlink-relay-key-{}", std::process::id()));
-        let (sk1, pk1) = load_or_generate_key(Some(&path)).unwrap();
-        let (_sk2, pk2) = load_or_generate_key(Some(&path)).unwrap();
+        let k1 = load_or_generate_keys(Some(&path)).unwrap();
+        let k2 = load_or_generate_keys(Some(&path)).unwrap();
         let _ = std::fs::remove_file(&path);
-        assert_eq!(pk1.as_bytes(), pk2.as_bytes());
-        assert_eq!(sk1.to_bytes(), _sk2.to_bytes());
+        // The long-term identity must survive restarts: it is the gossip
+        // anchor clients pin against.
+        assert_eq!(k1.sphinx_pk.as_bytes(), k2.sphinx_pk.as_bytes());
+        assert_eq!(k1.identity_pk, k2.identity_pk);
+        assert_eq!(k1.identity_sk.to_bytes(), k2.identity_sk.to_bytes());
+    }
+
+    #[test]
+    fn old_32_byte_key_file_is_migrated() {
+        // Simulate an M1/M2 x25519-only key file: it must be upgraded to the
+        // 64-byte format with a stable sphinx key and a fresh identity.
+        let path =
+            std::env::temp_dir().join(format!("unlink-relay-key-old-{}", std::process::id()));
+        let old_sk = StaticSecret::random();
+        std::fs::write(&path, old_sk.to_bytes()).unwrap();
+        let k = load_or_generate_keys(Some(&path)).unwrap();
+        let raw = std::fs::read(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(raw.len(), 64, "migrated file must be 64 bytes");
+        assert_eq!(k.sphinx_sk.to_bytes(), old_sk.to_bytes());
     }
 
     #[test]

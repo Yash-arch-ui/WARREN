@@ -1,13 +1,13 @@
 # UNLINK threat model
 
-*Status: M0–M2 written up. Still provisional against the full
+*Status: M0–M3 written up. Still provisional against the full
 `unlink-project-spec.md` (never attached); to be reconciled once it is
 shared.*
 
 This document defines what UNLINK's mixnet architecture is *designed* to
 defend against and — just as importantly — what it **explicitly does not**
-for the MVP. Every M1/M2 engineering decision should be traceable back to an
-entry here.
+for the MVP. Every M1/M2/M3 engineering decision should be traceable back to
+an entry here.
 
 ---
 
@@ -15,7 +15,12 @@ entry here.
 
 - The **directory** is a trusted (but auditable) root: it is *not* a mix
   relay and never sees message traffic. Its public key is pinned in the
-  client (out-of-band). It signs the relay list. *(Stub — M-later.)*
+  client (out-of-band). It signs the relay list. *(Stub — M-later.)* In M3
+  the *list mechanics* are real: every relay self-signs its metadata with a
+  long-term ed25519 key and clients verify a signed gossip list (see §2.E
+  and §8.5). What is still missing is a *separate directory entity* that
+  aggregates and vouches for relay identity keys — first-use trust is
+  currently TOFU from the live relays themselves (see §2.E caveats).
 - The **issuer** (M2) is a trusted root for *admission only*: it signs blind
   tokens, never sees message traffic, and cannot link a redemption back to
   an issuance (see §4). A compromised issuer can mint tokens (a spam vector)
@@ -84,6 +89,48 @@ reduction; it is the standard mixnet trade-off.
 post-compromise security for message *content*. SURBs (single-use reply
 blocks, via `sphinx-packet`'s `surb` module) allow anonymous replies without
 revealing your address.
+
+### E. Poisoned relay list / unauthenticated relay pubkeys (M3)
+
+**Capability:** an attacker who can intercept the client's connection to a
+relay (or who controls a compromised gossip source) substitutes its own
+x25519 key for the real relay's. Without authentication the client would
+build its Sphinx route under keys the attacker holds, letting the attacker
+decrypt every layer and deanonymize the sender (the "poisoned-relay-list"
+attack, spec §8.5).
+
+**Defense (M3, "a signed gossip list is enough" — spec §5.4):**
+
+1. Every relay has a **long-term ed25519 identity key** (separate from its
+   per-session x25519 Sphinx key) and self-signs a `RelayClaim`
+   `(address, sphinx_pubkey, identity_pubkey)` at startup.
+2. The client loads a **signed gossip list** and verifies **every entry's
+   self-signature** before it will send anything. An attacker cannot forge
+   an entry for an honest relay because it does not hold that relay's
+   ed25519 key.
+3. On the live handshake the relay returns its signed claim; the client
+   verifies the signature **and cross-checks identity + sphinx keys against
+   the list entry for that address**. A MITM substituting its own keys (or
+   a relay that restarted with new keys while the list is stale) is
+   rejected with a clean error.
+
+**Verified in code and over the wire (M3):** `directory::tests`
+(`tampered_claim_rejected`, `signature_binds_to_identity_key`,
+`list_verify_rejects_any_bad_entry`, `unsigned_wire_body_rejected`),
+`client::tests` (`handshake_claim_verified_and_parsed`,
+`handshake_unsigned_claim_rejected`), and `tests/m3_directory.rs`
+(valid list routes a message; unsigned / tampered / forged entries are
+rejected by the real `unlink send` CLI).
+
+**First-use caveat (TOFU, accepted for MVP):** a self-signature proves the
+entry was produced by whoever holds that identity key — it does not by
+itself prove the key belongs to the *real* relay at that address. The
+client's protection is that it pins identity keys via the list (assembled
+once, e.g. via `unlink directory-fetch` against relays it already trusts)
+and thereafter rejects any relay whose live claim does not match. A
+**separate directory authority** that vouches for identity keys
+out-of-band, and real gossip **propagation** (exchanging lists between
+clients / a DHT), are M5+ — see §6.
 
 ## 3. Explicitly NOT defended against in MVP scope
 
@@ -183,9 +230,12 @@ We use `blind-rsa-signatures` (RFC 9474 / Privacy Pass v1) — see
   previously-spent token becomes possible until the epoch ends (persistence /
   sync is M3); (b) admission is enforced only at the entry relay — a client
   connecting straight to a middle/exit relay bypasses the gate (in M3,
-  middle/exit relays also require proofs or restrict ingress); (c) the
-  client→relay pubkey handshake is unauthenticated plaintext — a MITM can
-  substitute its own key for hop 1 (this is the directory's future job).
+  middle/exit relays also require proofs or restrict ingress).
+
+  The former M2 caveat "(c) the client→relay pubkey handshake is
+  unauthenticated plaintext" is **resolved in M3**: the handshake now
+  returns the relay's self-signed claim, and the client verifies it and
+  cross-checks it against its verified gossip list (spec §8.5; see §2.E).
 
 ## 5. Defense-in-depth notes
 
@@ -203,7 +253,14 @@ We use `blind-rsa-signatures` (RFC 9474 / Privacy Pass v1) — see
 ## 6. Open items
 
 - Reconcile against the full spec (esp. §9 timing, §3.2 admission position).
-- Real directory + constrained random path selection (per-operator caps).
+- Real directory authority + constrained random path selection (per-operator
+  caps). The signed-list *mechanics* are M3 (self-signed relay claims,
+  client-side list verification, handshake cross-check — §2.E); what
+  remains is the **trust bootstrap**: an out-of-band directory/pubkey that
+  vouches for relay identity keys, and **gossip propagation** (exchanging
+  lists between clients, a DHT) — per spec §5.4's own "full DHT is a
+  stretch goal", propagation is deliberately **M5+ future work**, flagged
+  here rather than silently dropped.
 - Real bootstrap for token batches (spec §4; PoW/reputation) — replaces the
   one-batch-per-client stub.
 - Persist/sync the relay double-spend set across restarts (M3); per-hop
