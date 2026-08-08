@@ -1,0 +1,14 @@
+# Rust build artifacts
+/target
+
+# Local state that unlink will create at runtime (identity keys, config)
+# NOTE: identity material must NEVER be committed.
+.unlink/
+*.key
+*.pem
+
+# Editor / OS noise
+.idea/
+.vscode/
+*.swp
+.DS_Store

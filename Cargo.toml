@@ -1,0 +1,28 @@
+[package]
+name = "unlink"
+version = "0.1.0"
+edition = "2024"
+description = "UNLINK — a minimal CLI client for a mixnet-routed messenger"
+license = "Apache-2.0"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+# Sphinx mix-packet format (M1) — see docs/LIBRARY_SELECTION.md §1
+sphinx-packet = "0.7.0"
+# Blind-signature admission tokens (M2) — RFC 9474 / Privacy Pass v1, see
+# docs/LIBRARY_SELECTION.md §2
+blind-rsa-signatures = "0.17"
+x25519-dalek = { version = "3", features = ["getrandom", "static_secrets", "zeroize"] }
+sha2 = "0.11"
+rand = "0.10"
+hex = { version = "0.4", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+[dev-dependencies]
+hex = "0.4"
+
+[profile.release]
+lto = true
