@@ -10,7 +10,8 @@
 //! entry    = "127.0.0.1:7001"
 //! middle   = "127.0.0.1:7002"
 //! exit     = "127.0.0.1:7003"
-//! delay_ms = 10   # per-hop mix delay, tunable per user (spec §3.2); relays enforce it
+//! delay_ms = 10   # MEAN per-hop mix delay (ms): each hop's delay is sampled
+//!                 # from an exponential with this mean (Poisson mixing, §3.2)
 //!
 //! [peers.bob]
 //! addr = "127.0.0.1:9001"   # delivery address of the final relay's client
@@ -30,9 +31,11 @@ pub struct Config {
     pub peers: std::collections::HashMap<String, Peer>,
 }
 
-/// Default per-hop mix delay in milliseconds (spec §3.2's "randomized per-hop
-/// delay, tunable per user" — MVP uses a single fixed value per user; random
-/// per-hop jitter is a named follow-up, see `docs/THREAT_MODEL.md` §3.1).
+/// Default **mean** per-hop mix delay in milliseconds (spec §3.2's
+/// "randomized per-hop delay, tunable per user"). Each hop's actual delay is
+/// sampled from an exponential distribution with this mean (Poisson mixing,
+/// M5 — `mix::exp_delay_ms`), so it is a *distribution*, not a constant
+/// offset.
 pub const DEFAULT_DELAY_MS: u64 = 10;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -40,10 +43,13 @@ pub struct Relays {
     pub entry: String,
     pub middle: String,
     pub exit: String,
-    /// Per-hop delay carried in the Sphinx header and **enforced by each
-    /// relay** (sleep before forwarding). A user can set this to 0 for
-    /// minimal latency or raise it for more mixing; M4 measures latency at
-    /// multiple values.
+    /// **Mean** per-hop delay in ms, carried in the Sphinx header and
+    /// enforced by each relay (sleep before forwarding). Each hop's actual
+    /// delay is sampled from an exponential distribution with this mean
+    /// (Poisson mixing, spec §3.2 — `mix::exp_delay_ms`), so it is a
+    /// distribution, not a constant. Set to 0 for minimal latency or raise
+    /// it for more mixing; the latency/anonymity tradeoff is measured in
+    /// `docs/LATENCY.md`.
     #[serde(default = "default_delay_ms")]
     pub delay_ms: u64,
 }

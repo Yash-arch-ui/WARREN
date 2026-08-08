@@ -125,11 +125,16 @@ fn three_hop_routing_delivers_and_no_relay_sees_sender_and_receiver() {
 }
 
 /// The per-hop mix delay (spec §3.2, `[relays] delay_ms`) must be **enforced**
-/// by the relays, not just carried in the header. With `delay_ms = 400`,
-/// delivery physically cannot complete faster than ~2 × 400 ms (entry and
-/// middle each sleep before forwarding; `FinalHop` has no delay field, so the
-/// exit delivers immediately). A *lower-bound* timing assertion is robust:
-/// it can only fail if the delay mechanism is missing or bypassed.
+/// by the relays, not just carried in the header. Since M5, `delay_ms` is a
+/// Poisson *mean* — each hop's delay is sampled from an exponential with that
+/// mean — so a single-message lower bound would be wrong: the sample can
+/// legitimately be tiny. The honest statistical form: with 8 sends at mean
+/// 200 ms, at least one delivery must exceed 150 ms of enforced delay.
+/// Per message, P(entry+middle delay < 150 ms) for S = Exp(200)+Exp(200) is
+/// 1 − e^(−0.75)·1.75 ≈ 0.173, so P(all 8 under 150 ms) ≈ 0.173⁸ ≈ 3 × 10⁻⁶ —
+/// the test can only fail if the sleep mechanism is missing, never by luck.
+/// (The exact distribution shape is pinned deterministically in `mix::tests`;
+/// `tests/m6_mixing.rs` verifies the sampled delays on the wire.)
 #[test]
 fn per_hop_mix_delay_is_enforced_by_relays() {
     let tmp = TempDir::new("m1-delay");
@@ -144,7 +149,7 @@ fn per_hop_mix_delay_is_enforced_by_relays() {
         &cfg_path,
         (&entry.addr, &middle.addr, &exit.addr),
         &[("bob", &receiver.addr, &bob_id, &bob_otk)],
-        400,
+        200,
     );
     let cfg = Config::load(&cfg_path).unwrap();
 
@@ -153,25 +158,28 @@ fn per_hop_mix_delay_is_enforced_by_relays() {
     let epoch = Epoch(1);
     let issuer = Issuer::new(epoch).unwrap();
     let mut wallet = ClientTokenWallet::new(epoch, issuer.public_key_pem().unwrap());
-    wallet.request_batch(&issuer, 1).unwrap();
+    let sends = 8usize;
+    wallet.request_batch(&issuer, sends).unwrap();
     let list_path = alice_home.join("relays.json");
     write_relay_list(&list_path, &[&entry, &middle, &exit]);
     let list = SignedRelayList::load_and_verify(&list_path).unwrap();
 
     let bob_peer = cfg.peers.get("bob").unwrap();
-    let wire = ratchet
-        .encrypt(&bob_peer.id, &bob_peer.otk, "slow boat")
-        .unwrap();
-    let token = wallet.spend_token().unwrap();
-
-    let t0 = Instant::now();
-    client::send_packet(&cfg, &list, &receiver.addr, &wire, Some(&token)).unwrap();
-    receiver.wait_for_messages(1, Duration::from_secs(10));
-    let elapsed = t0.elapsed();
+    let mut slowest = Duration::ZERO;
+    for i in 0..sends {
+        let wire = ratchet
+            .encrypt(&bob_peer.id, &bob_peer.otk, &format!("slow boat {i}"))
+            .unwrap();
+        let token = wallet.spend_token().unwrap();
+        let t0 = Instant::now();
+        client::send_packet(&cfg, &list, &receiver.addr, &wire, Some(&token)).unwrap();
+        receiver.wait_for_messages(i + 1, Duration::from_secs(30));
+        slowest = slowest.max(t0.elapsed());
+    }
 
     assert!(
-        elapsed >= Duration::from_millis(700),
-        "per-hop delay not enforced: message delivered in {elapsed:?} \
-         (expected ≥ 2 × 400 ms from entry+middle sleeps)"
+        slowest >= Duration::from_millis(150),
+        "per-hop delay not enforced: slowest of {sends} sends at mean 200 ms \
+         delivered in {slowest:?}"
     );
 }

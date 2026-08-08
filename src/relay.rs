@@ -20,19 +20,23 @@
 //!
 //! The per-hop header `Delay` is **enforced**: before forwarding, the relay
 //! sleeps for the delay the *sender* chose (tunable per user via
-//! `[relays] delay_ms`, spec §3.2). The honored delay is **capped** at
-//! [`MAX_HONORED_DELAY`]: the header value is sender-controlled, so an
-//! uncapped sleep would let one malicious frame pin a relay thread (and its
-//! open socket) for an arbitrarily long time. This is a fixed per-hop delay —
-//! real cover traffic and Poisson-distributed (Loopix-style) delay are named
-//! follow-ups, see `docs/THREAT_MODEL.md` §3.1.
+//! `[relays] delay_ms`, spec §3.2). Since M5 the client samples each hop's
+//! delay from an exponential distribution (Poisson mixing), so the honored
+//! delay is a distribution, not a constant offset. The honored delay is
+//! **capped** at [`MAX_HONORED_DELAY_MS`]: the header value is
+//! sender-controlled, so an uncapped sleep would let one malicious frame pin
+//! a relay thread (and its open socket) for an arbitrarily long time.
+//!
+//! **Cover traffic (spec §3.2) lands in the second half of M5** (the
+//! relay-side dummy-packet emitter, its own commit).
 
 /// Upper bound a relay will sleep for a sender-chosen per-hop delay, in
 /// milliseconds. Defense against the unbounded-delay DoS: a client can put
 /// any value in the Sphinx header, so without a cap one hostile frame could
 /// pin a relay's connection thread indefinitely. Delays above this are
-/// clamped (and logged), not honored.
-pub const MAX_HONORED_DELAY_MS: u64 = 30_000;
+/// clamped (and logged), not honored. (Single source of truth:
+/// [`mix::MAX_DELAY_MS`], which the client-side sampler clamps to as well.)
+pub const MAX_HONORED_DELAY_MS: u64 = mix::MAX_DELAY_MS;
 
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
@@ -49,6 +53,7 @@ use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::credential::{AdmissionDecision, RelayAdmission};
 use crate::directory::{self, RelayClaim};
+use crate::mix;
 use crate::net;
 
 /// A relay's two key roles: the per-session x25519 Sphinx key and the

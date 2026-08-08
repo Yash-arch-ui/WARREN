@@ -20,6 +20,9 @@ ed25519-dalek = "2.1"
 vodozemac = "0.10"
 sha2 = "0.11"
 rand = "0.10"
+# Exponential/Poisson sampling for mix timing (M5) — already in the tree via
+# sphinx-packet, which uses rand_distr::Exp for its Delay type; see docs/LIBRARY_SELECTION.md §6
+rand_distr = "0.6"
 hex = { version = "0.4", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
