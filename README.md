@@ -102,6 +102,7 @@ tests/
   m2_admission.rs     # valid / replay / out-of-tokens / unlinkability over the wire
   m3_directory.rs     # signed list: valid routing + unsigned/tampered/forged rejection
   m4_ratchet.rs       # full bidirectional Double Ratchet session over the real path
+  m5_load.rs          # concurrent token abuse: relay stays responsive, drops correct
 docs/
   LIBRARY_SELECTION.md  # sphinx-packet (§1) + blind-rsa-signatures (§2) + ed25519 (§4) + vodozemac (§5)
   THREAT_MODEL.md       # adversary model, credential guarantees, MVP non-goals
@@ -112,7 +113,7 @@ docs/
 ## Test
 
 ```console
-$ cargo test          # crypto units, CLI smoke, routing + admission + directory + ratchet integration
+$ cargo test          # crypto units, CLI smoke, routing + admission + directory + ratchet + load integration
 $ cargo clippy --all-targets -- -D warnings
 ```
 
