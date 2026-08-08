@@ -207,8 +207,10 @@ impl Receiver {
     }
 }
 
-/// Write a client config TOML. Each peer is a `[peers.<label>]` table with
-/// its delivery address + Layer-3 ratchet keys (id/otk).
+/// Write a client config TOML with the **default** per-hop mix delay (the
+/// field is omitted → `config::DEFAULT_DELAY_MS` applies). Each peer is a
+/// `[peers.<label>]` table with its delivery address + Layer-3 ratchet keys
+/// (id/otk).
 pub fn write_config(
     path: &Path,
     relays: (&str, &str, &str),
@@ -216,6 +218,28 @@ pub fn write_config(
 ) {
     let mut s = format!(
         "[relays]\nentry = \"{}\"\nmiddle = \"{}\"\nexit = \"{}\"\n",
+        relays.0, relays.1, relays.2
+    );
+    for (label, addr, id, otk) in peers {
+        s.push_str(&format!(
+            "\n[peers.{label}]\naddr = \"{addr}\"\nid = \"{id}\"\notk = \"{otk}\"\n"
+        ));
+    }
+    std::fs::write(path, s).unwrap();
+}
+
+/// Like [`write_config`], but with an **explicit** per-hop mix delay — the
+/// value is always written, including `0`, so a config point of "no delay" is
+/// measurable (the latency harness uses this for §5.5's multiple config
+/// points; a `0` here is genuinely 0 ms, not the config default).
+pub fn write_config_with_delay(
+    path: &Path,
+    relays: (&str, &str, &str),
+    peers: &[(&str, &str, &str, &str)], // (label, addr, id, otk)
+    delay_ms: u64,
+) {
+    let mut s = format!(
+        "[relays]\nentry = \"{}\"\nmiddle = \"{}\"\nexit = \"{}\"\ndelay_ms = {delay_ms}\n",
         relays.0, relays.1, relays.2
     );
     for (label, addr, id, otk) in peers {

@@ -1,5 +1,5 @@
-//! M3 latency measurement — RAW DATA ONLY (spec: \"raw data for M4, not
-//! analysis yet\").
+//! M3 latency measurement — RAW DATA ONLY (spec: "raw data for M4, not
+//! analysis yet").
 //!
 //! Times the full end-to-end send→receive cycle over the real 3-hop relay
 //! path with the full real stack: Layer-3 Double Ratchet encryption, M2 token
@@ -10,6 +10,10 @@
 //! Latency is measured as `t_arrival − t_send_returned`: the wall-clock time
 //! from the sender's send returning (message fully pushed into the entry
 //! relay) until the receiver's decrypt loop observed the delivered plaintext.
+//!
+//! Per spec §5.5, latency is captured at **two configuration points** of the
+//! per-hop mix delay (spec §3.2, `[relays] delay_ms`): `0 ms` (no enforced
+//! per-hop delay) and `25 ms` (each forwarding relay sleeps 25 ms).
 //!
 //! This test is `#[ignore]`d because it is environment-dependent and its
 //! numbers belong in `docs/LATENCY.md`, not in the CI suite. Run it with:
@@ -88,10 +92,10 @@ impl TimedReceiver {
     }
 }
 
-#[test]
-#[ignore = "environment-dependent; transcribe into docs/LATENCY.md manually"]
-fn measure_end_to_end_latency_over_real_path() {
-    let tmp = TempDir::new("latency");
+/// One measurement run at a given per-hop delay configuration. Spawns its own
+/// relay set so config points never interfere.
+fn run_at_delay(tag: &str, delay_ms: u64) {
+    let tmp = TempDir::new(&format!("latency-{tag}"));
     let entry = RelayProcess::spawn(&["--key", &tmp.path().join("key-entry").to_string_lossy()]);
     let middle = RelayProcess::spawn(&["--key", &tmp.path().join("key-middle").to_string_lossy()]);
     let exit = RelayProcess::spawn(&["--key", &tmp.path().join("key-exit").to_string_lossy()]);
@@ -107,10 +111,11 @@ fn measure_end_to_end_latency_over_real_path() {
     wallet.request_batch(&issuer, SAMPLES + 5).unwrap();
 
     let cfg_path = tmp.path().join("config.toml");
-    write_config(
+    write_config_with_delay(
         &cfg_path,
         (&entry.addr, &middle.addr, &exit.addr),
         &[("bob", &receiver.addr, &bob_id, &bob_otk)],
+        delay_ms,
     );
     let cfg = Config::load(&cfg_path).unwrap();
     let list_path = tmp.path().join("relays.json");
@@ -120,7 +125,7 @@ fn measure_end_to_end_latency_over_real_path() {
     let mut ratchet = RatchetClient::load(&alice_home).unwrap();
     let bob_peer = cfg.peers.get("bob").unwrap();
 
-    println!("latency_samples_start");
+    println!("latency_samples_start delay_ms={delay_ms}");
     let mut sends: Vec<(Instant, String)> = Vec::with_capacity(SAMPLES);
     for i in 0..SAMPLES {
         let msg = format!("latency-sample-{i}");
@@ -132,10 +137,10 @@ fn measure_end_to_end_latency_over_real_path() {
         // Small inter-message gap so deliveries don't coalesce into one batch.
         std::thread::sleep(Duration::from_millis(5));
     }
-    println!("latency_samples_end");
+    println!("latency_samples_end delay_ms={delay_ms}");
 
     // Pair each arrival with its send by message content (sends are in order).
-    let arrivals = receiver.wait(SAMPLES, Duration::from_secs(30));
+    let arrivals = receiver.wait(SAMPLES, Duration::from_secs(60));
     assert_eq!(arrivals.len(), SAMPLES, "all samples must arrive");
 
     let mut latencies: Vec<Duration> = Vec::with_capacity(SAMPLES);
@@ -149,16 +154,16 @@ fn measure_end_to_end_latency_over_real_path() {
     }
     latencies.sort();
 
-    println!("sample\tt_ms");
+    println!("sample\tt_ms\tdelay_ms={delay_ms}");
     for (i, l) in latencies.iter().enumerate() {
-        println!("{}\t{:.2}", i, l.as_secs_f64() * 1e3);
+        println!("{}\t{:.2}\t{delay_ms}", i, l.as_secs_f64() * 1e3);
     }
     let sum: Duration = latencies.iter().sum();
     let mean = sum / latencies.len() as u32;
     let p50 = latencies[latencies.len() / 2];
     let p95 = latencies[(latencies.len() as f64 * 0.95).floor() as usize];
     println!(
-        "summary\tmin_ms={:.2}\tmean_ms={:.2}\tp50_ms={:.2}\tp95_ms={:.2}\tmax_ms={:.2}",
+        "summary\tdelay_ms={delay_ms}\tmin_ms={:.2}\tmean_ms={:.2}\tp50_ms={:.2}\tp95_ms={:.2}\tmax_ms={:.2}",
         latencies.first().unwrap().as_secs_f64() * 1e3,
         mean.as_secs_f64() * 1e3,
         p50.as_secs_f64() * 1e3,
@@ -166,4 +171,13 @@ fn measure_end_to_end_latency_over_real_path() {
         latencies.last().unwrap().as_secs_f64() * 1e3,
     );
     println!("alice_id={alice_id}");
+}
+
+#[test]
+#[ignore = "environment-dependent; transcribe into docs/LATENCY.md manually"]
+fn measure_end_to_end_latency_over_real_path() {
+    // Two configuration points of the per-hop mix delay (spec §5.5):
+    // 0 ms (no enforced per-hop delay) and 25 ms.
+    run_at_delay("delay-0", 0);
+    run_at_delay("delay-25", 25);
 }

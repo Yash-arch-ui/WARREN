@@ -200,7 +200,10 @@ fn transmit_packet(
         DestinationAddressBytes::from_bytes(net::addr_to_field(receiver)?),
         [0u8; 16], // no mailbox identifier yet (M-later)
     );
-    let delays = vec![Delay::new_from_millis(10); PATH_LEN];
+    // Per-hop mix delay, tunable per user (spec §3.2): the configured value
+    // rides in each hop's Sphinx header and the relay enforces it by sleeping
+    // before forwarding. Set to 0 for minimal latency, higher for more mixing.
+    let delays = vec![Delay::new_from_millis(cfg.relays.delay_ms); PATH_LEN];
 
     // Payload = [u16 BE len][wire]: length-prefixed so a 0x01 byte inside
     // the ciphertext cannot be confused with the crate's padding marker.
@@ -451,6 +454,7 @@ mod tests {
                 entry: "127.0.0.1:1".into(),
                 middle: "127.0.0.1:1".into(),
                 exit: "127.0.0.1:1".into(),
+                delay_ms: crate::config::DEFAULT_DELAY_MS,
             },
             peers: Default::default(),
         };

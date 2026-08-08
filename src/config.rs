@@ -7,9 +7,10 @@
 //!
 //! ```toml
 //! [relays]
-//! entry  = "127.0.0.1:7001"
-//! middle = "127.0.0.1:7002"
-//! exit   = "127.0.0.1:7003"
+//! entry    = "127.0.0.1:7001"
+//! middle   = "127.0.0.1:7002"
+//! exit     = "127.0.0.1:7003"
+//! delay_ms = 10   # per-hop mix delay, tunable per user (spec §3.2); relays enforce it
 //!
 //! [peers.bob]
 //! addr = "127.0.0.1:9001"   # delivery address of the final relay's client
@@ -29,11 +30,26 @@ pub struct Config {
     pub peers: std::collections::HashMap<String, Peer>,
 }
 
+/// Default per-hop mix delay in milliseconds (spec §3.2's "randomized per-hop
+/// delay, tunable per user" — MVP uses a single fixed value per user; random
+/// per-hop jitter is a named follow-up, see `docs/THREAT_MODEL.md` §3.1).
+pub const DEFAULT_DELAY_MS: u64 = 10;
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Relays {
     pub entry: String,
     pub middle: String,
     pub exit: String,
+    /// Per-hop delay carried in the Sphinx header and **enforced by each
+    /// relay** (sleep before forwarding). A user can set this to 0 for
+    /// minimal latency or raise it for more mixing; M4 measures latency at
+    /// multiple values.
+    #[serde(default = "default_delay_ms")]
+    pub delay_ms: u64,
+}
+
+fn default_delay_ms() -> u64 {
+    DEFAULT_DELAY_MS
 }
 
 impl Relays {
@@ -104,9 +120,26 @@ otk = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
             cfg.relays.path(),
             ["127.0.0.1:7001", "127.0.0.1:7002", "127.0.0.1:7003"]
         );
+        assert_eq!(
+            cfg.relays.delay_ms, DEFAULT_DELAY_MS,
+            "delay_ms must default when omitted (backward compatible)"
+        );
         let bob = cfg.peers.get("bob").unwrap();
         assert_eq!(bob.addr, "127.0.0.1:9001");
         assert_eq!(bob.id.len(), 64);
         assert_eq!(bob.otk.len(), 64);
+    }
+
+    #[test]
+    fn delay_ms_is_tunable() {
+        let raw = r#"
+[relays]
+entry = "127.0.0.1:7001"
+middle = "127.0.0.1:7002"
+exit = "127.0.0.1:7003"
+delay_ms = 250
+"#;
+        let cfg: Config = toml::from_str(raw).unwrap();
+        assert_eq!(cfg.relays.delay_ms, 250);
     }
 }

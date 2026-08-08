@@ -40,9 +40,11 @@ ratchet identity=<bob-id> one_time=<bob-otk>
 # Terminal 4: write the config with the relay path and bob's ratchet keys
 $ cat > ~/.unlink/config.toml <<'EOF'
 [relays]
-entry  = "127.0.0.1:7001"
-middle = "127.0.0.1:7002"
-exit   = "127.0.0.1:7003"
+entry     = "127.0.0.1:7001"
+middle    = "127.0.0.1:7002"
+exit      = "127.0.0.1:7003"
+delay_ms  = 10   # per-hop mix delay (spec §3.2): each relay sleeps this
+                 # long before forwarding; 0 = no delay, tunable per user
 
 [peers.bob]
 addr = "127.0.0.1:9001"   # bob's delivery address

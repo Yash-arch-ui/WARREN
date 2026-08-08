@@ -150,9 +150,31 @@ revisited deliberately, not by accident.
    **Not fully solved** — by design and per spec §9. Sphinx provides
    *unlinkability of layers*, not *anonymity under global timing analysis*;
    that requires traffic shaping, cover traffic, and mix strategies
-   (e.g., Poisson mixing) beyond MVP. MVP mitigations are limited to:
+   (e.g., Poisson mixing) beyond MVP.
+
+   **Implemented (M3):** a **fixed per-hop mix delay, tunable per user**
+   (spec §3.2 "randomized per-hop delay and cover traffic… tunable per
+   user" — the *fixed* half): `[relays] delay_ms` rides in each hop's
+   Sphinx header and each relay **enforces** it by sleeping before
+   forwarding (`src/relay.rs`), so a user can trade latency for a basic
+   level of mixing at multiple config points (M4 measures at ≥2 values;
+   `tests/latency_measure.rs`, `docs/LATENCY.md`). The honored delay is
+   **capped** at `relay::MAX_HONORED_DELAY_MS` (30 s): the header value is
+   sender-controlled, so an uncapped sleep would let one hostile frame pin
+   a relay's connection thread indefinitely (DoS; pinned by
+   `relay::tests::delay_enforced_and_capped`). Existing mitigation:
    fixed-size packets (no length signal) and no plaintext routing metadata.
-   *This is the single biggest known gap and is deliberately deferred.*
+
+   **Named follow-ups (not silently absent):** (a) **real cover traffic**
+   packets (dummy messages so an observer cannot distinguish real traffic
+   from silence, nor count messages per user); (b) **Poisson-distributed /
+   randomized per-hop delay** (Loopix/Nym-style jitter) instead of the
+   current single fixed value. Both are beyond MVP scope and deliberately
+   deferred; per spec §3.2's own framing they are core Layer-1
+   architecture, so they are flagged here as the top M4+ timing items
+   rather than dropped.
+   *Global timing correlation remains the single biggest known gap and is
+   deliberately deferred.*
 
 2. **Sybil attacks on the directory.** An adversary who can flood the
    directory with colluding relays can increase `P(all hops adversarial)`.
@@ -275,5 +297,9 @@ We use `blind-rsa-signatures` (RFC 9474 / Privacy Pass v1) — see
 - Network-split issuer (issue over the wire, issuer key outside the client's
   data dir) — `Issuer::blind_sign` already takes only `BlindMessage`s, so
   the split is a serialization/transport exercise.
+- **Cover traffic + Poisson/randomized per-hop delay** (spec §3.2's core
+  Layer-1 timing architecture, beyond the fixed tunable delay implemented in
+  M3 — see §3.1): dummy cover packets and Loopix/Nym-style delay
+  distributions are the top M4+ timing items.
 - SURB-based replies; transport obfuscation; timing mixing (§3.1).
   (Double Ratchet content encryption is **done** — M3, §2.D.)

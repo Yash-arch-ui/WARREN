@@ -9,10 +9,14 @@
 
 mod common;
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use common::*;
+use unlink::client;
+use unlink::config::Config;
 use unlink::credential::{ClientTokenWallet, Epoch, Issuer};
+use unlink::directory::SignedRelayList;
+use unlink::ratchet::RatchetClient;
 
 #[test]
 fn three_hop_routing_delivers_and_no_relay_sees_sender_and_receiver() {
@@ -118,4 +122,56 @@ fn three_hop_routing_delivers_and_no_relay_sees_sender_and_receiver() {
             "{name} relay leaked the plaintext"
         );
     }
+}
+
+/// The per-hop mix delay (spec §3.2, `[relays] delay_ms`) must be **enforced**
+/// by the relays, not just carried in the header. With `delay_ms = 400`,
+/// delivery physically cannot complete faster than ~2 × 400 ms (entry and
+/// middle each sleep before forwarding; `FinalHop` has no delay field, so the
+/// exit delivers immediately). A *lower-bound* timing assertion is robust:
+/// it can only fail if the delay mechanism is missing or bypassed.
+#[test]
+fn per_hop_mix_delay_is_enforced_by_relays() {
+    let tmp = TempDir::new("m1-delay");
+    let entry = RelayProcess::spawn(&["--key", &tmp.path().join("key-entry").to_string_lossy()]);
+    let middle = RelayProcess::spawn(&["--key", &tmp.path().join("key-middle").to_string_lossy()]);
+    let exit = RelayProcess::spawn(&["--key", &tmp.path().join("key-exit").to_string_lossy()]);
+
+    let (bob_home, bob_id, bob_otk) = ratchet_init(&tmp, "bob");
+    let receiver = Receiver::start(&bob_home);
+    let cfg_path = tmp.path().join("config.toml");
+    write_config_with_delay(
+        &cfg_path,
+        (&entry.addr, &middle.addr, &exit.addr),
+        &[("bob", &receiver.addr, &bob_id, &bob_otk)],
+        400,
+    );
+    let cfg = Config::load(&cfg_path).unwrap();
+
+    let (alice_home, _alice_id, _alice_otk) = ratchet_init(&tmp, "alice");
+    let mut ratchet = RatchetClient::load(&alice_home).unwrap();
+    let epoch = Epoch(1);
+    let issuer = Issuer::new(epoch).unwrap();
+    let mut wallet = ClientTokenWallet::new(epoch, issuer.public_key_pem().unwrap());
+    wallet.request_batch(&issuer, 1).unwrap();
+    let list_path = alice_home.join("relays.json");
+    write_relay_list(&list_path, &[&entry, &middle, &exit]);
+    let list = SignedRelayList::load_and_verify(&list_path).unwrap();
+
+    let bob_peer = cfg.peers.get("bob").unwrap();
+    let wire = ratchet
+        .encrypt(&bob_peer.id, &bob_peer.otk, "slow boat")
+        .unwrap();
+    let token = wallet.spend_token().unwrap();
+
+    let t0 = Instant::now();
+    client::send_packet(&cfg, &list, &receiver.addr, &wire, Some(&token)).unwrap();
+    receiver.wait_for_messages(1, Duration::from_secs(10));
+    let elapsed = t0.elapsed();
+
+    assert!(
+        elapsed >= Duration::from_millis(700),
+        "per-hop delay not enforced: message delivered in {elapsed:?} \
+         (expected ≥ 2 × 400 ms from entry+middle sleeps)"
+    );
 }

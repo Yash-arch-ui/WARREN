@@ -18,18 +18,32 @@
 //!    per-hop unlinkability is what this module is built on; it is verified
 //!    in code in `client.rs` tests (`three_hop_per_hop_visibility`).
 //!
-//! The per-hop header `Delay` is logged but not enforced: traffic shaping /
-//! timing mixing is M3 (global timing correlation is an accepted gap — see
-//! `docs/THREAT_MODEL.md` §3.1).
+//! The per-hop header `Delay` is **enforced**: before forwarding, the relay
+//! sleeps for the delay the *sender* chose (tunable per user via
+//! `[relays] delay_ms`, spec §3.2). The honored delay is **capped** at
+//! [`MAX_HONORED_DELAY`]: the header value is sender-controlled, so an
+//! uncapped sleep would let one malicious frame pin a relay thread (and its
+//! open socket) for an arbitrarily long time. This is a fixed per-hop delay —
+//! real cover traffic and Poisson-distributed (Loopix-style) delay are named
+//! follow-ups, see `docs/THREAT_MODEL.md` §3.1.
+
+/// Upper bound a relay will sleep for a sender-chosen per-hop delay, in
+/// milliseconds. Defense against the unbounded-delay DoS: a client can put
+/// any value in the Sphinx header, so without a cap one hostile frame could
+/// pin a relay's connection thread indefinitely. Delays above this are
+/// clamped (and logged), not honored.
+pub const MAX_HONORED_DELAY_MS: u64 = 30_000;
 
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::{Result, anyhow};
 use ed25519_dalek::SigningKey;
 use sphinx_packet::SphinxPacket;
 use sphinx_packet::constants::SECURITY_PARAMETER;
+use sphinx_packet::header::delays::Delay;
 use sphinx_packet::packet::ProcessedPacketData;
 use x25519_dalek::{PublicKey, StaticSecret};
 
@@ -176,10 +190,8 @@ fn handle_sphinx(
                 delay,
             } => {
                 let addr = net::field_to_addr(next_hop_address.as_bytes());
-                println!(
-                    "forward to {addr} delay={}ms",
-                    delay.to_duration().as_millis()
-                );
+                let delay_dur = enforce_delay(delay);
+                println!("forward to {addr} delay={}ms", delay_dur.as_millis());
                 match forward_packet(&addr, &next_hop_packet.to_bytes()) {
                     Ok(()) => {}
                     Err(e) => println!("error: forwarding to {addr} failed: {e}"),
@@ -198,6 +210,38 @@ fn handle_sphinx(
         },
         Err(e) => println!("error: unwrap failed: {e}"),
     }
+}
+
+/// Clamp a sender-chosen per-hop delay to [`MAX_HONORED_DELAY_MS`]. The
+/// header value is sender-controlled, so without a cap one hostile frame
+/// could pin a relay's connection thread indefinitely (DoS).
+fn clamp_delay(delay: Delay) -> (Duration, bool) {
+    let cap = Duration::from_millis(MAX_HONORED_DELAY_MS);
+    let delay_dur = delay.to_duration();
+    if delay_dur > cap {
+        (cap, true)
+    } else {
+        (delay_dur, false)
+    }
+}
+
+/// Sleep for a sender-chosen per-hop mix delay (spec §3.2), **clamped** via
+/// [`clamp_delay`]. `FinalHop` carries no delay field in this crate, so the
+/// exit delivers immediately — entry+middle still contribute two enforced
+/// delay points on a 3-hop path. Returns the duration actually slept.
+fn enforce_delay(delay: Delay) -> Duration {
+    let (honored, clamped) = clamp_delay(delay);
+    if clamped {
+        println!(
+            "delay clamped to {}ms (sender asked {}ms)",
+            honored.as_millis(),
+            delay.to_duration().as_millis()
+        );
+    }
+    if !honored.is_zero() {
+        std::thread::sleep(honored);
+    }
+    honored
 }
 
 /// Split a frame body into `(proof, packet_bytes)`.
@@ -351,6 +395,31 @@ mod tests {
         payload.push(1);
         payload.extend_from_slice(&[0u8; 32]);
         assert_eq!(parse_payload(&payload), b"a\x01b\x01c");
+    }
+
+    #[test]
+    fn delay_clamped_and_enforced() {
+        // Zero delay: no sleep (returns instantly).
+        let t0 = std::time::Instant::now();
+        assert_eq!(enforce_delay(Delay::new_from_millis(0)), Duration::ZERO);
+        assert!(t0.elapsed() < Duration::from_millis(5));
+
+        // A normal value is honored as-is (clamp must not touch it).
+        let (honored, clamped) = clamp_delay(Delay::new_from_millis(1));
+        assert_eq!(honored, Duration::from_millis(1));
+        assert!(!clamped);
+
+        // An absurd sender-chosen value (built from raw nanos, the way a
+        // wire-parsed header value exists) is clamped to the cap — the
+        // unbounded-delay DoS must be impossible. Test the clamp purely so
+        // the suite doesn't sleep the full cap.
+        let (honored, clamped) = clamp_delay(Delay::new_from_nanos(u64::MAX));
+        assert_eq!(
+            honored,
+            Duration::from_millis(MAX_HONORED_DELAY_MS),
+            "hostile delay must be clamped to the cap"
+        );
+        assert!(clamped, "over-cap delay must be flagged as clamped");
     }
 
     #[test]
