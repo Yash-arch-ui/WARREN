@@ -1,0 +1,324 @@
+@import "tailwindcss";
+
+/* ============================================================
+   ALPHA & OVERSIGHT - DESIGN TOKENS
+   Backbone: AlphaLedger monochrome. Accents are SEMANTIC ONLY.
+   See FRONTEND_BUILD_PLAN.md §1 / §1b.
+   ============================================================ */
+:root {
+  /* core monochrome (AlphaLedger verbatim) */
+  --obsidian: #020202;
+  --frost: #fefefe;
+  --charcoal: #2b2b2b;
+  --gunmetal: #494949;
+  --slate: #636363;
+  --ash: #7f7f7f;
+
+  /* surfaces (dark-first) */
+  --bg-page: #020202;
+  --bg-section-alt: #070707;
+  --bg-nav: #060606;
+  --bg-card: #0f1011;
+  --bg-card-2: #16181c;
+  --bg-card-hover: #1b1e23;
+  --bg-inset: #0a0b0d;
+
+  /* ambient decorative glow (DeskBackdrop) — monochrome, theme-aware.
+     White on the dark backbone; flipped to a faint dark tint on light sections
+     so the glow still reads (white-on-white would vanish). band-blue is NEVER
+     used for decoration. */
+  --ambient-glow: rgba(255, 255, 255, 0.06);
+  --ambient-glow-2: rgba(255, 255, 255, 0.045);
+
+  /* borders / hairlines */
+  --border-subtle: #2a2a2a;
+  --border-default: #3a3a3a;
+  --border-strong: #4a4a4a;
+  --hairline: #1c1d1f;
+
+  /* type colors */
+  --text-primary: #fefefe;
+  --text-body: #c7ccd1;
+  --text-muted: #a6a6a6;
+  --text-faint: #858585;
+  --text-on-light: #14161c;
+
+  /* semantic accents - the ONLY chroma */
+  --band-blue: #3b82f6;
+  --band-blue-glow: #3b82f655;
+  --band-blue-dim: #1e3a5f;
+  --desk-rnd: #6b7280; /* graphite - tone-only (D3) */
+  --desk-surv: #9aa6c4; /* light slate - tone-only (D3) */
+  --verdict-pass: #34d399;
+  --verdict-flag: #ef4444;
+  --verdict-escalate: #f59e0b;
+  --verdict-complete: #10b981;
+
+  /* Warren semantics over the same palette: the two swimlanes (this machine
+     vs. the mix path) and the states a message moves through. */
+  --lane-local: var(--desk-rnd);
+  --lane-network: var(--desk-surv);
+  --state-delivered: var(--verdict-complete);
+  --state-inflight: var(--band-blue);
+  --state-token: var(--verdict-escalate);
+  --state-failed: var(--verdict-flag);
+  --state-cover: #7c7f8a; /* cover traffic reads as deliberately unremarkable */
+  --status-idle: #4a4f57;
+  --tier-frontier: #c9a227;
+  --tier-open: #6b7280;
+
+  /* radii / spacing */
+  --r-card: 14px;
+  --r-pill: 9999px;
+  --r-chip: 6px;
+  --maxw-content: 1280px;
+
+  /* motion */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast: 180ms;
+  --dur-reveal: 600ms;
+  --dur-count: 1400ms;
+}
+
+/* Hard LIGHT-section inversion (AlphaLedger signature - §1b) */
+[data-section="light"] {
+  --bg-page: #ffffff;
+  --bg-card: #fbfbfb;
+  --bg-card-2: #f4f4f4;
+  --text-primary: #14161c;
+  --text-body: #3a3a3a;
+  --text-muted: #646464;
+  --text-faint: #9a9a9a;
+  --border-default: #e7e7e7;
+  --border-subtle: #ececec;
+  --hairline: #e7e7e7;
+  --bg-inset: #f4f5f7;
+  --bg-nav: #f7f7f8;
+  --bg-section-alt: #f6f6f6;
+  --bg-card-hover: #eef0f3;
+  --border-strong: #d4d6da;
+  --band-blue-glow: #3b82f633;
+  --status-idle: #9aa0aa;
+  --ambient-glow: rgba(20, 22, 28, 0.05);
+  --ambient-glow-2: rgba(20, 22, 28, 0.035);
+}
+
+/* DARK reset - restores the root (dark) token values so a dark panel nested
+   INSIDE a [data-section="light"] frame (e.g. the /how-it-works story stage)
+   renders frost text on obsidian instead of inheriting the white-theme inks.
+   Mirrors exactly the tokens [data-section="light"] remaps. */
+[data-section="dark"] {
+  --bg-page: #020202;
+  --bg-card: #0f1011;
+  --bg-card-2: #16181c;
+  --text-primary: #fefefe;
+  --text-body: #c7ccd1;
+  --text-muted: #a6a6a6;
+  --text-faint: #858585;
+  --border-default: #3a3a3a;
+  --border-subtle: #2a2a2a;
+  --hairline: #1c1d1f;
+  --bg-inset: #0a0b0d;
+  --bg-nav: #060606;
+  --bg-section-alt: #070707;
+  --bg-card-hover: #1b1e23;
+  --border-strong: #4a4a4a;
+  --band-blue-glow: #3b82f655;
+  --status-idle: #4a4f57;
+  --ambient-glow: rgba(255, 255, 255, 0.06);
+  --ambient-glow-2: rgba(255, 255, 255, 0.045);
+}
+
+/* expose a core token subset to Tailwind utilities (bg-obsidian, text-frost, ...) */
+@theme inline {
+  --color-obsidian: var(--obsidian);
+  --color-frost: var(--frost);
+  --color-page: var(--bg-page);
+  --color-card: var(--bg-card);
+  --color-card-2: var(--bg-card-2);
+  --color-ink: var(--text-primary);
+  --color-body: var(--text-body);
+  --color-muted: var(--text-muted);
+  --color-faint: var(--text-faint);
+  --color-band: var(--band-blue);
+  --color-flag: var(--verdict-flag);
+  --color-pass: var(--verdict-pass);
+  --color-escalate: var(--verdict-escalate);
+  --color-rnd: var(--desk-rnd);
+  --color-surv: var(--desk-surv);
+  --color-local: var(--lane-local);
+  --color-network: var(--lane-network);
+  --color-delivered: var(--state-delivered);
+  --color-inflight: var(--state-inflight);
+  --color-token: var(--state-token);
+  --color-failed: var(--state-failed);
+  --color-cover: var(--state-cover);
+  --color-frontier: var(--tier-frontier);
+  --color-open: var(--tier-open);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--bg-page);
+  color: var(--text-primary);
+  font-family: var(--font-geist-sans), "Aktiv Grotesk", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---- responsive guards (D2 mobile fallbacks) ----
+   The landing + how-it-works GSAP pins and 3D device frames can momentarily
+   paint past the viewport edge on narrow screens (transient pin/refresh
+   states); clamp the page so a stray child can never produce a horizontal
+   scrollbar. Per-element native scrollers (FeaturesCarousel swipe track,
+   AuditChain ladder) opt back in with their own `overflow-x-auto`.
+   `overflow-x: clip` (not `hidden`) so it does NOT establish a scroll container
+   - that would break the GSAP/`position: sticky` pins. */
+body {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+/* ---- signature keyframes (FRONTEND_BUILD_PLAN.md §8) ---- */
+@keyframes band-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px var(--band-blue), 0 0 0 var(--band-blue-glow);
+  }
+  50% {
+    box-shadow: 0 0 0 1px var(--band-blue), 0 0 22px var(--band-blue-glow);
+  }
+}
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes codify-flash {
+  0% {
+    border-color: var(--verdict-escalate);
+    box-shadow: 0 0 18px #f59e0b44;
+  }
+  100% {
+    border-color: var(--border-subtle);
+    box-shadow: none;
+  }
+}
+
+/* ---- landing-only keyframes/helpers (HeroScroll) ---- */
+@keyframes scroll-cue {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.85;
+  }
+  50% {
+    transform: translateY(6px);
+    opacity: 1;
+  }
+}
+
+.anim-scroll-cue {
+  animation: scroll-cue 1.6s var(--ease-out) infinite;
+}
+
+.anim-band-pulse {
+  animation: band-pulse 1.6s var(--ease-out) infinite;
+}
+.anim-fade-up {
+  animation: fade-up var(--dur-reveal) var(--ease-out) both;
+}
+.anim-codify {
+  animation: codify-flash 1.2s var(--ease-out) 0.4s both;
+}
+
+/* accessibility - respect reduced motion (ui-ux-pro-max priority #7) */
+@media (prefers-reduced-motion: reduce) {
+  .anim-band-pulse,
+  .anim-fade-up,
+  .anim-codify,
+  .anim-scroll-cue,
+  .ops-trace,
+  .ops-sweep {
+    animation: none !important;
+  }
+  * {
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================================
+   HOW-IT-WORKS "ops" surface — a BOLDER editorial layer, PAGE-SCOPED.
+   Additive only: nothing above is changed, so the landing page and every
+   other route are untouched. Everything here lives under [data-surface="ops"]
+   set on the /how-it-works root. Display = Fraunces (editorial serif);
+   data/eyebrows stay Geist Mono; band-blue stays sacred.
+   ============================================================ */
+[data-surface="ops"] {
+  --font-display: var(--font-geist-sans), system-ui, sans-serif;
+  --ops-line: color-mix(in srgb, var(--band-blue) 7%, transparent);
+}
+[data-surface="ops"] .font-display {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.012em;
+}
+
+/* faint forensic blueprint grid (for dark stages / section backdrops) */
+.ops-grid {
+  background-image:
+    linear-gradient(to right, var(--ops-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--ops-line) 1px, transparent 1px);
+  background-size: 46px 46px;
+  background-position: center;
+}
+.ops-grid-fade {
+  -webkit-mask-image: radial-gradient(ellipse 80% 70% at 50% 40%, #000 35%, transparent 78%);
+  mask-image: radial-gradient(ellipse 80% 70% at 50% 40%, #000 35%, transparent 78%);
+}
+
+/* film-grain overlay — static texture, reduced-motion safe. Use on a
+   position:relative parent (the grain paints into ::after). */
+.ops-grain {
+  position: relative;
+  isolation: isolate;
+}
+.ops-grain::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* a thin top hairline that glows band-blue (section seam on dark stages) */
+.ops-seam {
+  border-top: 1px solid color-mix(in srgb, var(--band-blue) 22%, transparent);
+  box-shadow: 0 -1px 24px -8px var(--band-blue-glow);
+}
+
+/* band-blue glow ring for genuine "on Band" elements (sacred-blue only) */
+.ops-glow-band {
+  box-shadow: 0 0 0 1px var(--band-blue), 0 0 26px var(--band-blue-glow);
+}
+
+/* self-drawing diagram trace fallback + wall sweep (kit, when JS motion off) */
+@keyframes ops-trace {
+  from { stroke-dashoffset: var(--ops-len, 1200); }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes ops-sweep {
+  0% { transform: translateX(-8%); opacity: 0; }
+  12% { opacity: 1; }
+  88% { opacity: 1; }
+  100% { transform: translateX(108%); opacity: 0; }
+}
