@@ -61,12 +61,12 @@ export function DeskShowcaseHeader() {
       {/* brand: identical to the landing nav (logomark + uppercase wordmark), home */}
       <Link
         href="/"
-        aria-label="Alpha & Oversight - home"
+        aria-label="Warren - home"
         className="group inline-flex items-center gap-2.5"
         style={{ color: INK }}
       >
         <Logomark size={22} className="transition-opacity duration-300 group-hover:opacity-80" />
-        <span className="font-sans text-[13px] font-bold uppercase tracking-[0.16em]">Alpha &amp; Oversight</span>
+        <span className="font-sans text-[13px] font-bold uppercase tracking-[0.16em]">Warren</span>
       </Link>
       <nav className="flex items-center gap-6">
         <Link

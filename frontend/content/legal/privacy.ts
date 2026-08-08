@@ -1,25 +1,26 @@
-// Privacy policy for the Alpha & Oversight demonstration project (lablab.ai
-// "Band of Agents" hackathon). Written to be honest about a research demo: no
-// accounts, no payments, synthetic data. This committed copy is the source of
-// truth for the /privacy page.
+// Privacy policy for Warren, an open-source mixnet messenger. Written to be
+// honest about what a self-hosted client/relay actually does: no accounts, no
+// server-side logging of message content, nothing leaves your machine that the
+// protocol doesn't require. This committed copy is the source of truth for the
+// /privacy page.
 import type { LegalDoc } from "./types";
 
 const doc: LegalDoc = {
   title: "Privacy Policy",
   updated: "Last updated: June 17, 2026",
-  subtitle: "A demonstration project, not a commercial service",
+  subtitle: "An open-source project, not a hosted service",
   intro: [
-    'Alpha & Oversight is an open-source demonstration built for the lablab.ai "Band of Agents" hackathon. It is not a commercial product or a hosted trade-surveillance service.',
-    "This page explains, in plain terms, what the project does and does not handle. Because it is a demo, it is designed to collect as little about you as possible.",
+    "Warren is an open-source mixnet client and relay: Sphinx routing, a Double Ratchet, blind-signature admission tokens, and a K-of-N relay directory. It is not a hosted service - the `warren serve` daemon that backs the desk UI runs on your own machine, loopback-only.",
+    "This page explains, in plain terms, what the software does and does not handle. Because there is no account and no server we operate on your behalf, there is very little to collect in the first place.",
   ],
   sections: [
     {
       num: "01",
-      heading: "What Alpha & Oversight is",
+      heading: "What Warren is",
       id: "what-this-is",
       blocks: [
-        "Alpha & Oversight is a research demo that shows how a group of AI agents and a deterministic rule engine can review market-manipulation scenarios. It runs on synthetic, seeded order data - not on anyone's real trading activity.",
-        "There are no user accounts, no logins, and no payments. You do not need to register or provide any personal information to view the demo.",
+        "Warren is a messenger built for structural anonymity: message content is encrypted end to end with a Double Ratchet, and the route a message takes is hidden by Sphinx packet layering, mix delay, and cover traffic. There is no central server that sees your messages.",
+        "There are no user accounts, no logins, and no payments. Identity is a locally generated keypair you control.",
       ],
     },
     {
@@ -27,32 +28,32 @@ const doc: LegalDoc = {
       heading: "Information we collect",
       id: "information-we-collect",
       blocks: [
-        "The interactive demo runs in your browser and talks to a backend we operate for the event. We do not ask you for personal information, and we do not collect trading data, financial credentials, or account details.",
-        "If the project is hosted online, the server and any analytics it uses may record standard technical information such as your IP address, browser type, and which pages you view. This is used only to keep the demo running and to understand aggregate usage. It is never sold or shared for advertising.",
+        "We - the project maintainers - do not operate a backend that your client talks to. `warren serve` runs on your machine and binds to 127.0.0.1 only; it refuses to bind any other address, because it holds an unlocked wallet and ratchet state with no authentication layer.",
+        "Message content and delivery state are kept in a local journal on your machine for the desk UI to read. Nothing about your messages is transmitted to the project maintainers or any third party we operate.",
       ],
     },
     {
       num: "03",
-      heading: "Information we do not collect",
-      id: "information-we-do-not-collect",
+      heading: "What relays can and cannot see",
+      id: "what-relays-can-see",
       blocks: [
-        "We do not collect real brokerage or exchange data, real order flow, payment information, government identifiers, or sensitive personal data. The market activity shown in the demo is generated for illustration.",
+        "If you run or use public relays (entry, middle, exit), each relay by design sees only the address of the next hop - never the full path, and never the message content, which stays encrypted until it reaches the recipient's ratchet. Relays hold no secrets and are safe to expose publicly; that structural limit is the point of the design, not a policy promise.",
       ],
     },
     {
       num: "04",
-      heading: "Cookies and analytics",
+      heading: "Telemetry and analytics",
       id: "cookies-and-analytics",
       blocks: [
-        "The demo does not require you to sign in and does not use cookies to identify you personally. Any analytics used are limited to basic, aggregate usage measurement.",
+        "The client and relay binaries do not phone home. The frontend, if you deploy it, uses no tracking cookies and no third-party analytics beyond what a static hosting provider collects on its own.",
       ],
     },
     {
       num: "05",
-      heading: "Third-party services",
+      heading: "Directory keys and relay operators",
       id: "third-party-services",
       blocks: [
-        "To produce the agent reasoning shown in the demo, the backend may send synthetic scenario data to third-party AI model providers. No personal information about you is included in those requests.",
+        "Trusting a relay list requires K-of-N attestation from independently operated directory keys. If you rely on relays or directory keys operated by others, review their own privacy practices - Warren's design limits what any single relay can observe, but does not control what an operator logs on their own infrastructure.",
       ],
     },
     {
@@ -60,7 +61,7 @@ const doc: LegalDoc = {
       heading: "Your choices",
       id: "your-choices",
       blocks: [
-        "Because the demo does not create an account or store information about you, there is generally nothing to delete. You can stop using the demo at any time, and you can clear your browser data to remove anything cached locally.",
+        "Because nothing is stored on our infrastructure, there is generally nothing for us to delete on your behalf. You control your own local data directory (`~/.warren` by default) and can remove it at any time.",
       ],
     },
     {
@@ -76,7 +77,7 @@ const doc: LegalDoc = {
       heading: "Contact",
       id: "contact",
       blocks: [
-        "Questions about this project or this policy can be raised as an issue on the GitHub repository: github.com/Sarnav07/Alpha-oversight.",
+        "Questions about this project or this policy can be raised as an issue on the GitHub repository: github.com/Yash-arch-ui/WARREN.",
       ],
     },
   ],

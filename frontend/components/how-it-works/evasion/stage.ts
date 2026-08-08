@@ -1,13 +1,13 @@
 /**
- * stage.ts - geometry + helpers for the "The Evasion" pinned scroll-story stage.
+ * stage.ts - geometry + helpers for the "The Observer" pinned scroll-story stage.
  *
  * The stage is a single dark SVG canvas (viewBox 1000×560) showing a horizontal
- * order/time lane. The lane's x-axis is TIME in milliseconds (0 → ~600ms); order
- * events are dots along it; a ~400ms cancel cluster forms the layering evasion; a
- * rule-window bracket spans a candidate time width centered on the cluster; a
- * cancel_to_fill ratio needle sits to the right.
+ * wire/time lane. The lane's x-axis is TIME in milliseconds (0 → ~600ms); packet
+ * events are dots along it; a ~400ms packet burst forms as the sender chunks and
+ * sends; a correlation-window bracket spans a candidate time width the observer
+ * guesses, centered on the burst; a confidence-ratio needle sits to the right.
  *
- * Everything here is pure (no React) so EvasionStory can drive it from scroll.
+ * Everything here is pure (no React) so CorrelationStory can drive it from scroll.
  */
 
 export const VIEW_W = 1000;
@@ -37,9 +37,9 @@ export function twidth(ms: number): number {
 /* Axis tick marks (ms) drawn under the rail. */
 export const TICKS = [0, 100, 200, 300, 400, 500, 600] as const;
 
-/* ── benign order flow (chapter 1) ──────────────────────────────────────────
- * Calm places/fills ticking along the lane. `lane` offsets a dot above/below the
- * rail so the flow reads as a book, not a single line. */
+/* ── ordinary wire traffic (chapter 1) ──────────────────────────────────────
+ * Calm sends/cover ticking along the lane. `lane` offsets a dot above/below the
+ * rail so the flow reads as real traffic, not a single line. */
 export type FlowDot = { ms: number; lane: -1 | 0 | 1; kind: "place" | "fill" };
 
 export const BENIGN_FLOW: FlowDot[] = [
@@ -61,9 +61,10 @@ export function laneY(lane: -1 | 0 | 1): number {
   return LANE.y + lane * 34;
 }
 
-/* ── the cancel cluster (chapters 2→) ───────────────────────────────────────
- * Eight CANCEL marks spanning ~400ms - the layering evasion. Centered on the
- * lane mid so the rule-window bracket can sit symmetrically around it. */
+/* ── the packet burst (chapters 2→) ─────────────────────────────────────────
+ * Eight marks spanning ~400ms - the sender's chunked packets leaving in a tight
+ * window. Centered on the lane mid so the correlation-window bracket can sit
+ * symmetrically around it. */
 export const CLUSTER = {
   startMs: 110,
   endMs: 510, // span ≈ 400ms
@@ -73,15 +74,16 @@ export const CLUSTER = {
 export const CLUSTER_CENTER_MS = (CLUSTER.startMs + CLUSTER.endMs) / 2; // 310
 export const CLUSTER_SPAN_MS = CLUSTER.endMs - CLUSTER.startMs; // 400
 
-/** x positions of the 8 cancel marks, evenly spread across the cluster span. */
+/** x positions of the 8 packet marks, evenly spread across the burst span. */
 export const CANCEL_XS: number[] = Array.from({ length: CLUSTER.count }, (_, i) => {
   const ms = CLUSTER.startMs + (CLUSTER_SPAN_MS * i) / (CLUSTER.count - 1);
   return tx(ms);
 });
 
-/* ── rule-window bracket ─────────────────────────────────────────────────────
- * A bracket centered on the cluster center spanning a candidate window WIDTH.
- * Returns the left/right x for a given window width in ms. */
+/* ── correlation-window bracket ──────────────────────────────────────────────
+ * A bracket centered on the burst center spanning a candidate window WIDTH -
+ * the delay window the observer is guessing at. Returns the left/right x for a
+ * given window width in ms. */
 export function windowBracket(widthMs: number): { left: number; right: number; cx: number } {
   const cx = tx(CLUSTER_CENTER_MS);
   const half = twidth(widthMs) / 2;
@@ -90,20 +92,20 @@ export function windowBracket(widthMs: number): { left: number; right: number; c
 
 /* Candidate / final window widths used across the chapters. */
 export const WINDOW = {
-  seed: 100, // the deterministic seed rule (FINRA-5210-layering)
-  prosecution: 420, // prosecution argues a wide window
-  defense: 80, // defense argues a tight window
-  codified: 450, // human-confirmed widened window (100 → 450)
+  seed: 100, // the observer's first, naive guess
+  prosecution: 420, // a wide guess - assumes long mix delay
+  defense: 80, // a narrow guess - assumes near-zero delay
+  codified: 450, // the widest guess the observer settles on, still unconfirmed
 } as const;
 
-/* ── cancel_to_fill ratio gauge ─────────────────────────────────────────────
+/* ── confidence ratio gauge ──────────────────────────────────────────────────
  * A vertical bar on the right column; the needle rises with the ratio. */
 export const GAUGE = {
   x: 812,
   top: 132, // y at ratio 1.0
   bottom: 452, // y at ratio 0.0
   width: 56,
-  threshold: 0.8, // FINRA-5210 spoofing seed rule: cancel ≥ 80% within the window
+  threshold: 0.8, // the confidence level at which the observer would call it a match
 } as const;
 
 /** Map a ratio (0..1) → needle y on the gauge. */
@@ -117,5 +119,5 @@ export const RATIO = {
   evasion: 0.94,
 } as const;
 
-/* The Chinese-wall divider sweeps across this x (chapter 3). */
+/* The hop-boundary divider sweeps across this x (chapter 3). */
 export const WALL_X = 472;

@@ -8,17 +8,16 @@ import { Methodology } from "@/components/how-it-works/sections/Methodology";
 import { ProjectStructure } from "@/components/how-it-works/sections/ProjectStructure";
 import { WhatsDifferent } from "@/components/how-it-works/sections/WhatsDifferent";
 import { SeeItLive } from "@/components/how-it-works/sections/SeeItLive";
-import { EvasionStory } from "@/components/how-it-works/EvasionStory";
+import { CorrelationStory } from "@/components/how-it-works/CorrelationStory";
 
 /**
- * /how-it-works - rebuilt from scratch on the report's six-part spine:
+ * /how-it-works - walkthrough on a six-part spine:
  *   Motivation → Overview → Methodology → Project structure → What's different → See it live.
  *
- * The report figures are recreated as native, self-drawing SVG schematics (the
- * `diagram/` kit) - embedded, not pasted. The two gems are reused: the
- * `EvasionStory` scroll-centerpiece mounts into Methodology sub-flow (d); the
- * live `TopologyGraph` is surfaced via the SeeItLive → /desk hand-off (its natural
- * habitat - it needs the live trace stream).
+ * Native, self-drawing SVG schematics (the `diagram/` kit) - embedded, not
+ * pasted. The `CorrelationStory` scroll-centerpiece mounts into Methodology
+ * sub-flow (d); the live `TopologyGraph` is surfaced via the SeeItLive → /desk
+ * hand-off (its natural habitat - it needs the live trace stream).
  *
  * Aesthetic is page-scoped to `data-surface="ops"` (a bolder "forensic operations
  * room": Fraunces display + Geist Mono data + band-blue glow / blueprint grid /
@@ -28,9 +27,9 @@ import { EvasionStory } from "@/components/how-it-works/EvasionStory";
  * Server component - every child owns its own "use client" + scroll hooks.
  */
 export const metadata: Metadata = {
-  title: "How it works · Alpha & Oversight",
+  title: "How it works · Warren",
   description:
-    "The adversary invents, the system learns. Two desks across one Chinese wall, eight agents and a deterministic rule engine, refereed over a Band of agents - every verdict cited, every Band message hash-chained. Read the from-scratch walkthrough with native, self-drawing schematics.",
+    "A message crosses a mix network in layers - Sphinx-wrapped, token-gated, delayed against a Poisson clock. Every hop learns only its neighbor. No hop, and no observer on the wire, learns the rest. Read the from-scratch walkthrough with native, self-drawing schematics.",
 };
 
 export default function HowItWorksPage() {
@@ -45,7 +44,7 @@ export default function HowItWorksPage() {
         <HiwHero />
         <MotivationSection />
         <HiwOverview />
-        <Methodology evasionSlot={<EvasionStory />} />
+        <Methodology evasionSlot={<CorrelationStory />} />
         <ProjectStructure />
         <WhatsDifferent />
         <SeeItLive />

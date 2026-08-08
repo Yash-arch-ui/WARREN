@@ -1,14 +1,14 @@
 "use client";
 
 /**
- * §3.6 - "See it live" closing CTA. A dark, cinematic ops stage (obsidian +
+ * §6 - "See it live" closing CTA. A dark, cinematic ops stage (obsidian +
  * blueprint grid + grain) with an `.ops-seam` band-blue top hairline. Two
  * actions: primary "Watch it run live" → /desk (the genuine "go to the live
- * Band" action, so it carries the sacred band-blue glow), and secondary "Read
- * the full report (PDF)" → /alpha-oversight-report.pdf.
+ * desk" action, so it carries the sacred band-blue glow), and secondary "View
+ * source" → the GitHub repo.
  *
  * band-blue is reserved for the one CTA that actually walks you onto the live
- * Band; nothing else here is decorative blue. No hard-coded hex - tokens only.
+ * desk; nothing else here is decorative blue. No hard-coded hex - tokens only.
  */
 
 import Link from "next/link";
@@ -16,10 +16,10 @@ import { Reveal } from "@/components/anim/Reveal";
 import { MaskLines } from "@/components/anim/MaskLines";
 
 const FACTS = [
-  "8 agents + 1 rule engine",
-  "2 desks · 1 wall",
-  "4 → 5 rules",
-  "100% deterministic verdicts",
+  "3 hops, no full path",
+  "K-of-N attested directory",
+  "blind-signature tokens",
+  "305 body bytes / packet",
 ];
 
 export function SeeItLive() {
@@ -33,7 +33,7 @@ export function SeeItLive() {
       <div className="relative z-10 mx-auto max-w-[var(--maxw-content)] px-6 text-center">
         <Reveal>
           <p className="font-mono text-xs uppercase tracking-[0.2em] text-[color:var(--text-muted)]">
-            Alpha &amp; Oversight · The live desk
+            Warren · The live desk
           </p>
         </Reveal>
 
@@ -46,16 +46,16 @@ export function SeeItLive() {
               See it live.
             </span>,
             <span key="b" className="text-[color:var(--text-faint)]">
-              Watch the adversary lose.
+              Watch the observer lose.
             </span>,
           ]}
         />
 
         <Reveal delay={0.1}>
           <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-[color:var(--text-body)] sm:text-lg">
-            Open the desk to watch a case move across Band in real time - the
-            handoff, the local debate, and the deterministic verdict - or read
-            the full report for the architecture end to end.
+            Open the desk to send a real message across the mix in real time -
+            the chunking, the hop-by-hop relay, the verified path - or read the
+            source for the architecture end to end.
           </p>
         </Reveal>
 
@@ -79,17 +79,14 @@ export function SeeItLive() {
               </span>
             </Link>
 
-            {/* secondary - read the report. Plain <a> (NOT next/link): the PDF is
-                a static /public asset, not an app route, so the App Router router
-                can't navigate to it - a Link silently does nothing. Open in a new
-                tab. */}
+            {/* secondary - view source, a plain external link to GitHub */}
             <a
-              href="/alpha-oversight-report.pdf"
+              href="https://github.com/Yash-arch-ui/WARREN"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 rounded-full border border-[color:var(--border-default)] px-7 py-3.5 font-mono text-sm font-semibold tracking-[0.02em] text-[color:var(--text-primary)] transition-colors duration-200 hover:border-[color:var(--text-muted)]"
             >
-              Read the full report (PDF)
+              View source
             </a>
           </div>
         </Reveal>

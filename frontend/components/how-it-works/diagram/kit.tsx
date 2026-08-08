@@ -2,16 +2,22 @@
 
 /**
  * Diagram kit - the shared SVG primitives every /how-it-works diagram is built
- * from, so the four native schematics (architecture, oracle-loop, verdict, trust)
- * read as one family and match the site idiom (cf. landing OverviewSection's
- * self-drawing nonagon). Diagrams self-DRAW on scroll-into-view (not scrubbed);
- * `useReducedMotion` renders the final state instantly.
+ * from, so the five native schematics (architecture, hop-relay, token-issuance,
+ * delivery, trust) read as one family and match the site idiom (cf. landing
+ * OverviewSection's self-drawing nonagon). Diagrams self-DRAW on
+ * scroll-into-view (not scrubbed); `useReducedMotion` renders the final state
+ * instantly.
  *
  * Rules baked in:
- *  - band-blue is sacred: only `tone="band"` edges/pulses use it (= "on Band").
- *  - the rule engine is the authority: `EngineNode` is the only gold-ringed node.
+ *  - band-blue is sacred: only `tone="band"` edges/pulses use it (= "on the wire").
+ *  - `EngineNode` is the one gold-ringed authority node in whichever diagram
+ *    it appears - what it represents (K-of-N directory, exit unwrap, delivery
+ *    state machine) is passed via its `title`/`sub` props.
  *  - verdict colours keep their meaning (pass=emerald, flag=red, escalate=amber).
- * All colour comes from tokens; nothing here hard-codes a hex.
+ * All colour comes from tokens; nothing here hard-codes a hex. Tone identifiers
+ * (band/rnd/surv/engine/flag/pass/escalate/human/neutral) are internal color
+ * slots, not user-visible text - they're reused across diagrams with different
+ * meanings per context and intentionally not renamed.
  */
 
 import { useRef, type ReactNode } from "react";
@@ -220,7 +226,7 @@ export function Edge({
   );
 }
 
-/* ── a band-blue pulse dot riding a path (= live "on Band" cue) ───────────── */
+/* ── a band-blue pulse dot riding a path (= live "on the wire" cue) ───────── */
 export function BandPulse({
   path,
   show,

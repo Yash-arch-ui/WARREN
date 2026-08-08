@@ -1,10 +1,10 @@
 "use client";
 
 /**
- * HiwHero - the opener for /how-it-works (spec §5, bolder forensic-ops register).
+ * HiwHero - the opener for /how-it-works.
  * A dark cinematic stage (data-section="dark" + ops grain/grid) carrying the
  * signature two-tone Fraunces headline, a mono eyebrow, a tight sub-line, two
- * CTAs, a self-drawing order-book lane motif (PLACE/CANCEL ticks that draw in),
+ * CTAs, a self-drawing wire-lane motif (SEND/COVER ticks that draw in),
  * and a system-true mono fact-strip. Reduced-motion → everything final, no draw.
  *
  * Rules honored: band-blue stays sacred (only the on-Band tick + glow CTA use
@@ -23,54 +23,56 @@ const EASE = [0.16, 1, 0.3, 1] as [number, number, number, number];
 
 /* ── system-true fact-strip (never embellish - see spec §5) ───────────────── */
 const FACTS = [
-  "8 agents + 1 rule engine",
-  "2 desks · 1 wall",
-  "4 → 5 rules",
-  "100% deterministic verdicts",
+  "3 hops, no full path",
+  "K-of-N attested directory",
+  "blind-signature tokens",
+  "305 body bytes / packet",
 ];
 
-/* ── order-lane motif ──────────────────────────────────────────────────────
-   A thin order-book lane: a baseline that draws across, resting-order rungs
-   that rise, and a few PLACE / CANCEL ticks. One CANCEL is the on-Band cue
-   (band-blue + pulse); the rest stay neutral/verdict-toned. Self-draws on
-   scroll-into-view; reduced-motion renders the final frame instantly. */
+/* ── packet-lane motif ─────────────────────────────────────────────────────
+   A thin wire lane: a baseline that draws across, jittered SEND/COVER ticks
+   (real traffic mixed with chaff - the point is an observer can't tell them
+   apart). One SEND is the hop-crossing cue (band-blue + pulse, the moment a
+   packet leaves visibility into the mix); the rest stay neutral/verdict-toned.
+   Self-draws on scroll-into-view; reduced-motion renders the final frame
+   instantly. */
 type Tick = {
   x: number;
   /** rung height as a fraction of the lane (0..1, top = bigger book depth) */
   depth: number;
-  kind: "PLACE" | "CANCEL";
-  /** band = the one on-Band cancel (sacred blue + pulse) */
-  band?: boolean;
+  kind: "SEND" | "COVER";
+  /** hop = the one tick crossing into the mix (sacred blue + pulse) */
+  hop?: boolean;
 };
 
 const LANE_W = 920;
 const LANE_H = 132;
 const BASE_Y = 104; // baseline within the 0..LANE_H box
 const TICKS: Tick[] = [
-  { x: 70, depth: 0.42, kind: "PLACE" },
-  { x: 168, depth: 0.66, kind: "PLACE" },
-  { x: 266, depth: 0.55, kind: "CANCEL" },
-  { x: 364, depth: 0.78, kind: "PLACE" },
-  { x: 462, depth: 0.7, kind: "CANCEL", band: true },
-  { x: 560, depth: 0.5, kind: "PLACE" },
-  { x: 658, depth: 0.62, kind: "CANCEL" },
-  { x: 756, depth: 0.84, kind: "PLACE" },
-  { x: 854, depth: 0.48, kind: "CANCEL" },
+  { x: 70, depth: 0.42, kind: "COVER" },
+  { x: 168, depth: 0.66, kind: "SEND" },
+  { x: 266, depth: 0.55, kind: "COVER" },
+  { x: 364, depth: 0.78, kind: "SEND" },
+  { x: 462, depth: 0.7, kind: "SEND", hop: true },
+  { x: 560, depth: 0.5, kind: "COVER" },
+  { x: 658, depth: 0.62, kind: "SEND" },
+  { x: 756, depth: 0.84, kind: "COVER" },
+  { x: 854, depth: 0.48, kind: "SEND" },
 ];
 
 function tickColor(t: Tick): string {
-  if (t.band) return "var(--band-blue)";
-  return t.kind === "CANCEL" ? "var(--verdict-flag)" : "var(--verdict-pass)";
+  if (t.hop) return "var(--band-blue)";
+  return t.kind === "COVER" ? "var(--verdict-flag)" : "var(--verdict-pass)";
 }
 
-function OrderLane() {
+function PacketLane() {
   const reduce = useReducedMotion() ?? false;
   const ref = useRef<HTMLDivElement | null>(null);
   const inView = useInView(ref, { once: true, amount: 0.4 });
   const show = reduce || inView;
-  const bandTick = TICKS.find((t) => t.band)!;
-  const bandPath = `M ${bandTick.x} ${BASE_Y} L ${bandTick.x} ${
-    BASE_Y - bandTick.depth * (LANE_H - 40)
+  const hopTick = TICKS.find((t) => t.hop)!;
+  const hopPath = `M ${hopTick.x} ${BASE_Y} L ${hopTick.x} ${
+    BASE_Y - hopTick.depth * (LANE_H - 40)
   }`;
 
   return (
@@ -79,7 +81,7 @@ function OrderLane() {
         viewBox={`0 0 ${LANE_W} ${LANE_H}`}
         className="h-auto w-full"
         role="img"
-        aria-label="An order-book lane: resting orders are placed and cancelled along a timeline; one cancellation rides the Band coordination spine (highlighted)."
+        aria-label="A wire lane: real messages and cover traffic tick along a timeline, indistinguishable from outside; one send crosses into the mix (highlighted)."
       >
         {/* baseline - the order-book time axis */}
         <motion.line
@@ -112,13 +114,13 @@ function OrderLane() {
                 x2={t.x}
                 y2={top}
                 stroke={color}
-                strokeWidth={t.band ? 2.4 : 1.6}
+                strokeWidth={t.hop ? 2.4 : 1.6}
                 strokeLinecap="round"
                 initial={reduce ? false : { pathLength: 0 }}
                 animate={show ? { pathLength: 1 } : undefined}
                 transition={{ duration: 0.55, delay, ease: EASE }}
               />
-              <circle cx={t.x} cy={top} r={t.band ? 4 : 3} fill={color} />
+              <circle cx={t.x} cy={top} r={t.hop ? 4 : 3} fill={color} />
               <text
                 x={t.x}
                 y={BASE_Y + 18}
@@ -126,7 +128,7 @@ function OrderLane() {
                 className="font-mono"
                 fontSize={9}
                 letterSpacing="0.08em"
-                fill={t.band ? "var(--band-blue)" : "var(--text-muted)"}
+                fill={t.hop ? "var(--band-blue)" : "var(--text-muted)"}
               >
                 {t.kind}
               </text>
@@ -134,10 +136,10 @@ function OrderLane() {
           );
         })}
 
-        {/* the on-Band cue: a band-blue pulse riding the sacred cancel rung */}
+        {/* the hop cue: a band-blue pulse riding the tick that crosses into the mix */}
         {!reduce && show && (
           <circle r={3.4} fill="var(--band-blue)">
-            <animateMotion dur="1.8s" repeatCount="indefinite" path={bandPath} />
+            <animateMotion dur="1.8s" repeatCount="indefinite" path={hopPath} />
           </circle>
         )}
       </svg>
@@ -156,21 +158,21 @@ export function HiwHero() {
         {/* eyebrow */}
         <Reveal>
           <p className="font-mono text-xs uppercase tracking-[0.28em] text-[color:var(--text-muted)]">
-            ALPHA &amp; OVERSIGHT · HOW IT WORKS
+            WARREN · HOW IT WORKS
           </p>
         </Reveal>
 
         {/* two-tone display headline (line-rise) */}
-        <h1 className="sr-only">The adversary invents. The system learns.</h1>
+        <h1 className="sr-only">Every hop learns one thing. No hop learns the rest.</h1>
         <MaskLines
           className="mt-6 font-display text-5xl leading-[1.02] sm:text-7xl"
           delay={0.05}
           lines={[
             <span key="l1" className="text-[color:var(--text-primary)]">
-              The adversary invents.
+              Every hop learns one thing.
             </span>,
             <span key="l2" className="text-[color:var(--text-faint)]">
-              The system learns.
+              No hop learns the rest.
             </span>,
           ]}
         />
@@ -178,9 +180,10 @@ export function HiwHero() {
         {/* sub-line */}
         <Reveal delay={0.15} className="mt-7 max-w-[60ch]">
           <p className="text-lg leading-relaxed text-[color:var(--text-body)] sm:text-xl">
-            Adversarial trade-surveillance, refereed by a Band of agents - where a
-            model invents new market manipulation and deterministic code, not an
-            LLM, renders every verdict.
+            A mixnet messenger where anonymity is structural, not promised -
+            Sphinx-layered packets, blind-signature tokens, and a K-of-N
+            relay directory, with no single component able to see sender,
+            recipient, and content at once.
           </p>
         </Reveal>
 
@@ -193,18 +196,20 @@ export function HiwHero() {
             >
               Watch it run live →
             </Link>
-            <Link
-              href="/alpha-oversight-report.pdf"
+            <a
+              href="https://github.com/Yash-arch-ui/WARREN"
+              target="_blank"
+              rel="noopener noreferrer"
               className="inline-flex items-center rounded-full border border-[var(--border-default)] px-7 py-3 font-mono text-sm font-semibold tracking-[0.04em] text-[color:var(--text-body)] transition-colors hover:border-[var(--text-muted)] hover:text-[color:var(--text-primary)]"
             >
-              Read the report
-            </Link>
+              View source
+            </a>
           </div>
         </Reveal>
 
-        {/* self-drawing order-lane motif */}
+        {/* self-drawing packet-lane motif */}
         <Reveal delay={0.3} className="mt-16">
-          <OrderLane />
+          <PacketLane />
         </Reveal>
 
         {/* mono fact-strip - system-true only */}

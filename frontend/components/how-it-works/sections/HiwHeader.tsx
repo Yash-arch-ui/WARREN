@@ -42,13 +42,13 @@ export function HiwHeader() {
             HOME (/) so it carries you back to the landing page. */}
         <a
           href="/"
-          aria-label="Alpha & Oversight - home"
+          aria-label="Warren - home"
           className="group inline-flex items-center gap-2.5 whitespace-nowrap"
           style={{ color: INK }}
         >
           <Logomark size={22} className="transition-opacity duration-300 group-hover:opacity-80" />
           <span className="font-sans text-[13px] font-semibold uppercase tracking-[0.16em]">
-            Alpha &amp; Oversight
+            Warren
           </span>
         </a>
 
@@ -71,13 +71,13 @@ export function HiwHeader() {
         {/* Right - report link + back home */}
         <div className="flex items-center gap-4 whitespace-nowrap sm:gap-5">
           <a
-            href="/alpha-oversight-report.pdf"
+            href="https://github.com/Yash-arch-ui/WARREN"
             target="_blank"
             rel="noopener noreferrer"
             className="font-sans text-[12.5px] tracking-wide transition-opacity hover:opacity-70"
             style={{ color: INK }}
           >
-            Read the report
+            View source
           </a>
           <span aria-hidden style={{ color: BORDER }}>
             |

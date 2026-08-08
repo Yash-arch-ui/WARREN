@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * §3.3 - Methodology: the five sub-flows that form the spine of /how-it-works.
+ * §3 - Methodology: the five sub-flows that form the spine of /how-it-works.
  * A cinematic forensic-ops run (a)…(e), each a MethodBlock (mono eyebrow +
  * two-tone .font-display heading + lead-in + its visual). Sub-flow (d) renders
  * the integration-supplied `evasionSlot`. Token-only colours; dark stages are
@@ -34,7 +34,7 @@ function MethodBlock({
   children: ReactNode;
   delay?: number;
   /** When true, render `children` RAW - no <Reveal> wrapper. Required for a
-   *  child that pins via position:sticky (e.g. EvasionStory): a motion transform
+   *  child that pins via position:sticky (e.g. CorrelationStory): a motion transform
    *  ancestor establishes a containing block that breaks the sticky pin. */
   bare?: boolean;
 }) {
@@ -83,35 +83,25 @@ function Stage({ children, label }: { children: ReactNode; label: string }) {
   );
 }
 
-/* ── (c) supporting strip: the four seed detectors, rebuilt (not the old comp) ── */
-const SEED_RULES: {
-  family: string;
-  reg: string;
-  metric: string;
-  threshold: string;
-}[] = [
-  { family: "spoofing", reg: "FINRA 5210", metric: "cancel_ratio", threshold: "≥ 0.8" },
-  { family: "layering", reg: "FINRA 5210", metric: "depth_levels", threshold: "≥ 3" },
-  { family: "wash", reg: "SEC 10b-5", metric: "self_match_ratio", threshold: "> 0.5" },
-  { family: "marking", reg: "SEC 10b-5", metric: "eod_print_move_bps", threshold: "≥ 100" },
-];
+/* ── generic fact strip: reused for (b) chunk math and (c) directory fields ── */
+type FactRow = { label: string; sub: string; value: string };
 
-function SeedDetectors() {
+function FactStrip({ rows }: { rows: FactRow[] }) {
   return (
     <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
-      {SEED_RULES.map((r, i) => (
-        <Reveal key={r.family} delay={i * 0.05}>
+      {rows.map((r, i) => (
+        <Reveal key={r.label} delay={i * 0.05}>
           <div className="flex items-baseline justify-between gap-4 rounded-xl border border-[color:var(--border-subtle)] bg-[var(--bg-card)] px-5 py-4">
             <div>
               <p className="font-mono text-sm font-semibold text-[color:var(--text-primary)]">
-                {r.family}
+                {r.label}
               </p>
               <p className="mt-1 font-mono text-[0.72rem] uppercase tracking-[0.14em] text-[color:var(--text-muted)]">
-                {r.reg}
+                {r.sub}
               </p>
             </div>
             <p className="whitespace-nowrap font-mono text-[0.82rem] text-[color:var(--text-body)]">
-              {r.metric} <span className="text-[color:var(--verdict-flag)]">{r.threshold}</span>
+              {r.value}
             </p>
           </div>
         </Reveal>
@@ -119,6 +109,21 @@ function SeedDetectors() {
     </div>
   );
 }
+
+const CHUNK_FACTS: FactRow[] = [
+  { label: "packet payload", sub: "sphinx-packet crate", value: "1024 B total" },
+  { label: "ratchet + envelope overhead", sub: "Olm wire + JSON worst case", value: "~319 B" },
+  { label: "max message / packet", sub: "MAX_MSG_LEN", value: "~705 B raw" },
+  { label: "body bytes / packet", sub: "packet_payload_bytes() · hex-halved", value: "305 B" },
+];
+
+const DIRECTORY_FIELDS: FactRow[] = [
+  { label: "entries", sub: "Directory", value: "the relay list under attestation" },
+  { label: "attestations", sub: "Directory", value: "signatures collected this epoch" },
+  { label: "threshold", sub: "Directory", value: "min. valid signatures required" },
+  { label: "signers", sub: "Directory", value: "the K configured directory keys" },
+  { label: "policy_enforced", sub: "Directory", value: "unattested entries rejected outright" },
+];
 
 export function Methodology({ evasionSlot }: { evasionSlot?: ReactNode }) {
   return (
@@ -135,96 +140,101 @@ export function Methodology({ evasionSlot }: { evasionSlot?: ReactNode }) {
             Methodology · five sub-flows
           </p>
           <h2 className="mt-4 font-display text-4xl leading-[1.05] sm:text-5xl">
-            <span className="text-[color:var(--text-primary)]">How a case actually moves</span>{" "}
-            <span className="text-[color:var(--text-faint)]">- invent, investigate, decide, learn.</span>
+            <span className="text-[color:var(--text-primary)]">How a message actually moves</span>{" "}
+            <span className="text-[color:var(--text-faint)]">- mint, wrap, relay, hide, arrive.</span>
           </h2>
         </header>
 
         <div className="flex flex-col gap-16 sm:gap-24">
-          {/* (a) following one case, end to end */}
+          {/* (a) minting the right to send */}
           <MethodBlock
-            step="(a) following one case, end to end"
-            headPrimary="A line of agents,"
-            headFaint="no one calling the next."
+            step="(a) minting the right to send"
+            headPrimary="One proof of work,"
+            headFaint="before one packet moves."
             lead={
               <>
-                A case moves down a line of agents that never call each other directly - each
-                drops its work on Band and the next picks it up. The Anomaly Detector computes
-                hard features (cancel-to-fill, book depth, self-match) and decides if the flow
-                looks suspicious. The Investigator recruits the right Specialist by those
-                features, not by a guess. The Specialist proposes the contested inputs the engine
-                can&apos;t derive - the time window, the bona-fide orders, the intent. Prosecution
-                and Defense then argue the case locally, off Band, and the Adjudicator settles
-                their numbers.
+                Before any packet can enter the mix, the sender proves work:{" "}
+                <code className="font-mono text-[color:var(--text-primary)]">token-issue</code>{" "}
+                mines a challenge bound to (issuer nonce, client_id, epoch) - 26 leading zero bits
+                by default, about 67 million SHA-256 evaluations - and hands the solved challenge to
+                the issuer. The issuer verifies the work, then blind-signs a batch of admission
+                tokens without ever seeing which token maps to which packet. Blind signatures
+                (RFC 9474) make the token provably valid and provably unlinkable to the request
+                that minted it.
               </>
             }
           >
-            <Stage label="Fig 2 - the case relay across Band">
-              <CaseRelayDiagram />
-            </Stage>
-          </MethodBlock>
-
-          {/* (b) inventing a new evasion */}
-          <MethodBlock
-            step="(b) inventing a new evasion"
-            headPrimary="Two referees,"
-            headFaint="before anything crosses."
-            lead={
-              <>
-                A new tactic is never used until it proves itself twice. The Adversary proposes an
-                order sequence, and two deterministic referees gate it: the real rule engine must
-                miss it (it evades), and a backtest must show it makes money and moves the price
-                (it&apos;s real). Only a sequence that evades <em>and</em> profits crosses the
-                wall.
-              </>
-            }
-          >
-            <Stage label="Fig 3 - the R&D two-oracle gate">
+            <Stage label="Fig 2 - proof of work verified, then blind-signed">
               <OracleLoopDiagram />
             </Stage>
           </MethodBlock>
 
-          {/* (c) who decides the verdict */}
+          {/* (b) cutting the message to fit */}
           <MethodBlock
-            step="(c) who decides the verdict"
-            headPrimary="The verdict is never"
-            headFaint="an opinion."
+            step="(b) cutting the message to fit"
+            headPrimary="One packet holds"
+            headFaint="705 bytes, hex and all."
             lead={
               <>
-                The verdict is never an opinion. The engine takes the order events, the inputs the
-                debate resolved, and the active rules, then runs each rule&apos;s math. The first
-                rule that trips returns a FLAG with the rule id and the exact metric that crossed
-                the line; if none trip, the case passes. The agents only shape the contested
-                inputs. The engine alone turns them into PASS or FLAG, the same way every time.
+                A Sphinx packet payload is 1024 bytes; strip the onion-layer overhead and the
+                ratchet&apos;s own wire overhead and what&apos;s left for a message is{" "}
+                <code className="font-mono text-[color:var(--text-primary)]">MAX_MSG_LEN</code> -
+                about 705 bytes. Anything longer is split across several packets, and because the
+                body travels hex-encoded inside the client-server envelope, the real per-packet
+                budget the sender plans against is half that again: 305 body bytes. Every packet,
+                whole or partial, spends exactly one admission token.
               </>
             }
           >
-            <Stage label="Fig 4 - LLMs set inputs, code decides">
-              <VerdictDiagram />
-            </Stage>
-            <SeedDetectors />
+            <FactStrip rows={CHUNK_FACTS} />
           </MethodBlock>
 
-          {/* (d) closing the loop - integration mounts EvasionStory here */}
+          {/* (c) trusting a relay before spending a token */}
           <MethodBlock
-            step="(d) closing the loop"
-            headPrimary="From four rules"
-            headFaint="to five, in one click."
+            step="(c) trusting a relay before spending a token"
+            headPrimary="Every hop is checked"
+            headFaint="against a signed list."
             lead={
               <>
-                Here is the part that makes it self-improving. When the Adversary&apos;s novel
-                evasion reaches the engine, the seed rules miss it and the case passes - but
-                because the flow still looked suspicious, it escalates to a human instead of
-                closing. A compliance officer confirms it really is manipulation, and that one
-                click does the rest: a new rule is derived from the case, replayed through a
-                regression gate to prove it now flags, and codified. Active rules go from four to
-                five, and the case flips from PASS to FLAGGED. The Adversary has to invent
-                something new.
+                The client only trusts a relay&apos;s address and keys once the signed relay list
+                carries valid attestations from at least the configured threshold of directory
+                keys - an attestation from a key that isn&apos;t one of the N is rejected outright,
+                not just ignored. Once trusted, each hop does one thing: peel its Sphinx layer,
+                read the next address, forward blind. No relay - not even the exit - ever sees the
+                full path.
+              </>
+            }
+          >
+            <Stage label="Fig 3 - one Sphinx layer peeled per hop">
+              <CaseRelayDiagram />
+            </Stage>
+            <FactStrip rows={DIRECTORY_FIELDS} />
+            <div className="mt-6">
+              <Stage label="Fig 4 - K-of-N directory attestation">
+                <TrustDiagram />
+              </Stage>
+            </div>
+          </MethodBlock>
+
+          {/* (d) hiding timing and volume - integration mounts CorrelationStory here */}
+          <MethodBlock
+            step="(d) hiding timing and volume"
+            headPrimary="Delay is drawn,"
+            headFaint="not fixed - and chaff fills the gaps."
+            lead={
+              <>
+                Here is the part built to defeat a wire observer directly. The sender samples each
+                hop&apos;s delay from an exponential distribution and carries it inside that
+                hop&apos;s Sphinx header; the relay enforces it by sleeping, so packets leave out
+                of order by design. Cover traffic runs on the same rhythm as real packets, so
+                nothing about arrival timing tells an observer which is which. On the receiving
+                side, a short reorder window restores order when it can, and releases anyway when
+                it can&apos;t wait any longer.
               </>
             }
             bare
           >
-            {/* EvasionStory carries its OWN dark-glass stage (SplitFrame: bg-inset
+            {/* CorrelationStory carries its OWN dark-glass stage (SplitFrame: bg-inset
                 + hairline border + shadow), so the INNER story reads dark while the
                 OUTER Methodology page stays light - which is what we want. No
                 full-bleed black wrapper (that made the outer dark too), and no
@@ -233,25 +243,25 @@ export function Methodology({ evasionSlot }: { evasionSlot?: ReactNode }) {
             {evasionSlot}
           </MethodBlock>
 
-          {/* (e) why you can trust it */}
+          {/* (e) arriving without a receipt */}
           <MethodBlock
-            step="(e) why you can trust it"
-            headPrimary="A wall you can’t coach,"
-            headFaint="a ledger you can’t edit."
+            step="(e) arriving without a receipt"
+            headPrimary="Delivered, maybe -"
+            headFaint="the sender never finds out for sure."
             lead={
               <>
-                Two things carry the trust. The wall (the SanitizedBridge) strips the
-                adversary&apos;s reasoning and model identity before any order crosses, so the
-                blue team can&apos;t be coached. The ledger seals every Band message into a hash
-                chain - each entry&apos;s hash is built from the previous hash plus the message
-                body, and binds the real Band message id. Change one byte and the chain breaks, so{" "}
-                <code className="font-mono text-[color:var(--text-primary)]">verify_chain()</code>{" "}
-                returns false. The decision isn&apos;t just recorded; it&apos;s tamper-evident.
+                The recipient&apos;s Double Ratchet decrypts each packet&apos;s body and the
+                reorder buffer reassembles the chunks back into one message. A message&apos;s state
+                moves QUEUED → ENCRYPTED → IN_FLIGHT → DELIVERED (or FAILED) - and stops there.
+                There&apos;s no ACKNOWLEDGED state, on purpose: a receipt traveling back along the
+                path would be exactly the correlation the design exists to prevent. The path
+                stays hidden even after delivery - unknowable from the recipient&apos;s side from
+                the start.
               </>
             }
           >
-            <Stage label="Fig 6 - the wall and the hash chain">
-              <TrustDiagram />
+            <Stage label="Fig 5 - delivery state machine, no receipt">
+              <VerdictDiagram />
             </Stage>
           </MethodBlock>
         </div>

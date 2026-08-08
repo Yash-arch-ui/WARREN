@@ -14,20 +14,20 @@ import { useIsMobile } from "@/components/landing/useIsMobile";
 import { DeskBackdrop } from "./DeskBackdrop";
 
 /**
- * DataFlow - report §12 / D12. How live data reaches the screen, as a PINNED
- * scroll-scrub: the section holds while a token walks the pipeline stage by
- * stage (Event bus → /stream → traceStore → useDeskModel → Panels), each
- * lighting up with its caption as you scroll. Reduced motion / mobile fall back
- * to a static stacked diagram.
+ * DataFlow - how live data reaches the screen, as a PINNED scroll-scrub: the
+ * section holds while a token walks the pipeline stage by stage (warren serve
+ * → /stream → useTraceStore → useDeskModel → Panels), each lighting up with
+ * its caption as you scroll. Reduced motion / mobile fall back to a static
+ * stacked diagram.
  */
 
 type Stage = { key: string; title: string; sub: string; body: string; tone: string };
 const STAGES: Stage[] = [
-  { key: "bus", title: "Backend · :8000", sub: "event bus", body: "Every agent action and REST mutation originates here. One case runs at a time.", tone: "var(--desk-rnd)" },
-  { key: "sse", title: "/stream", sub: "SSE", body: "A single JSON ActivityEvent frame per action - desk-tagged, reasoning stripped - streamed to the browser.", tone: "var(--desk-surv)" },
-  { key: "store", title: "traceStore", sub: "events", body: "An append-only zustand log of raw events. The honest record of exactly what crossed the wire.", tone: "var(--desk-surv)" },
-  { key: "model", title: "useDeskModel", sub: "fold", body: "One step folds the raw events into a single tidy DeskModel every panel reads from - and emits markers (verdict · escalate · codify).", tone: "var(--verdict-escalate)" },
-  { key: "panels", title: "Panels", sub: "topology · timeline · dossiers · rules · audit", body: "Each panel renders from the model. A marker also triggers a TanStack Query refetch of /stats · /rules · /audit.", tone: "var(--band-blue)" },
+  { key: "bus", title: "warren serve · :8800", sub: "event bus", body: "Every send, receive, and token mint originates here. The journal + event hub feed everything downstream.", tone: "var(--desk-rnd)" },
+  { key: "sse", title: "/api/v1/stream", sub: "SSE", body: "A single JSON event frame per action - node-tagged - streamed to the browser.", tone: "var(--desk-surv)" },
+  { key: "store", title: "useTraceStore", sub: "events", body: "An append-only zustand log of raw events. The honest record of exactly what crossed the wire.", tone: "var(--desk-surv)" },
+  { key: "model", title: "useDeskModel", sub: "fold", body: "One step folds the raw events into a single tidy DeskModel every panel reads from - and emits markers (encrypt · sphinx · deliver).", tone: "var(--verdict-escalate)" },
+  { key: "panels", title: "Panels", sub: "topology · timeline · directory · drawer", body: "Each panel renders from the model. A marker also triggers a refetch of /status · /relays · /stats.", tone: "var(--band-blue)" },
 ];
 
 const N = STAGES.length;
@@ -69,7 +69,7 @@ function PinnedDataFlow() {
         <div className="relative mx-auto w-full px-6" style={{ maxWidth: "var(--maxw-content)" }}>
           <Reveal>
             <span className="font-mono text-[11px] uppercase tracking-[0.18em]" style={{ color: "var(--text-muted)" }}>
-              Data flow · §12 · D12
+              Data flow
             </span>
           </Reveal>
           <h2 className="mt-4 font-sans" style={{ fontSize: "clamp(26px,3.6vw,42px)", fontWeight: 300, letterSpacing: "-0.02em", lineHeight: 1.08, color: "var(--text-primary)" }}>
@@ -123,7 +123,7 @@ function StaticDataFlow() {
   return (
     <div className="mx-auto px-6 py-24" style={{ maxWidth: "var(--maxw-content)" }}>
       <span className="font-mono text-[11px] uppercase tracking-[0.18em]" style={{ color: "var(--text-muted)" }}>
-        Data flow · §12 · D12
+        Data flow
       </span>
       <h2 className="mt-4 font-sans" style={{ fontSize: "clamp(26px,3.6vw,42px)", fontWeight: 300, letterSpacing: "-0.02em", color: "var(--text-primary)" }}>
         How live data reaches the screen.

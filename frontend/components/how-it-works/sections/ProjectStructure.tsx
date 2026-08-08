@@ -1,11 +1,11 @@
 "use client";
 
 /**
- * §3.4 - "How the code is organized" (light, compact module map, no diagram).
- * The forensic register: a mono module map where the deterministic core sits
- * apart from the agents that feed it. Editorial heading idiom (mono eyebrow +
- * two-tone .font-display headline), Reveal-staggered rows. No diagram, no hex,
- * band-blue untouched (this section names no on-Band element).
+ * §4 - "How the code is organized" (light, compact module map, no diagram).
+ * The forensic register: a mono module map where the trust primitives (tokens,
+ * directory) sit apart from the transport and client code that uses them.
+ * Editorial heading idiom (mono eyebrow + two-tone .font-display headline),
+ * Reveal-staggered rows. No diagram, no hex, band-blue untouched.
  */
 
 import { motion, useReducedMotion } from "framer-motion";
@@ -22,12 +22,15 @@ type ModuleRow = {
 };
 
 const MODULES: ModuleRow[] = [
-  { core: true, name: "rules/", desc: "the rule engine, the per-family math, and the rule registry." },
-  { name: "agents/", desc: "the agents and their specialist registry." },
-  { name: "band/", desc: "Band transport and the SanitizedBridge wall." },
-  { core: true, name: "audit/", desc: "the hash-chained ledger." },
-  { name: "state/", desc: "the case state machine." },
-  { name: "server/", desc: "the FastAPI server (SSE stream, case endpoints, demo triggers)." },
+  { name: "client.rs", desc: "keygen, path selection, packet build & send, listen - the user-facing core." },
+  { name: "relay.rs", desc: "the mix node: admission gate, Sphinx unwrap-and-forward, or final delivery." },
+  { core: true, name: "directory.rs", desc: "the signed relay list and K-of-N directory attestations." },
+  { core: true, name: "credential.rs", desc: "blind-signature admission tokens - the reputation gate." },
+  { name: "ratchet.rs", desc: "message-body encryption, Olm Double Ratchet via vodozemac." },
+  { name: "mix.rs", desc: "per-hop delay and cover traffic - the timing defense." },
+  { name: "pow.rs", desc: "the proof-of-work gate for token-batch bootstrap." },
+  { name: "net.rs", desc: "wire framing, dressed as TLS records." },
+  { name: "api.rs", desc: "warren serve - chunking, reassembly, the loopback HTTP/SSE surface." },
 ];
 
 function ModuleRowItem({ row, index }: { row: ModuleRow; index: number }) {
@@ -116,7 +119,7 @@ export function ProjectStructure() {
         <div className="mx-auto max-w-3xl">
           <Reveal>
             <p className="font-mono text-xs uppercase tracking-[0.2em] text-[color:var(--text-muted)]">
-              §3.4 · Project structure
+              §4 · Project structure
             </p>
           </Reveal>
           <h2 className="sr-only">How the code is organized</h2>
@@ -133,8 +136,8 @@ export function ProjectStructure() {
           />
           <Reveal delay={0.1}>
             <p className="mt-6 text-lg leading-relaxed text-[color:var(--text-body)]">
-              The backend keeps the deterministic core apart from the agents that
-              feed it.
+              The backend keeps the trust primitives - tokens, directory - apart
+              from the transport and client code that uses them.
             </p>
           </Reveal>
         </div>
@@ -164,8 +167,8 @@ export function ProjectStructure() {
                 className="mt-2 h-px w-8 shrink-0 bg-[color:var(--tier-frontier)]"
               />
               <p className="font-mono text-sm leading-relaxed text-[color:var(--text-muted)]">
-                Every flag can be traced from a Band message all the way to a
-                cited rule.
+                Every packet can be traced hop by hop, from admission token to
+                final delivery state.
               </p>
             </div>
           </Reveal>

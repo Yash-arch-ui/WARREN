@@ -6,36 +6,36 @@ import { Reveal } from "@/components/anim/Reveal";
 import { MaskLines } from "@/components/anim/MaskLines";
 
 /**
- * ServerSurface - report §10. The backend is a small FastAPI service the UI
+ * ServerSurface - the backend is a small Rust daemon (`warren serve`) the UI
  * talks to over a handful of REST endpoints + one live SSE stream. Left: the
- * endpoint table. Right: a live ActivityEvent ticker (the exact frame shape the
+ * endpoint table. Right: a live event ticker (the exact frame shape the
  * stream emits), frames appearing one at a time to sell "live". Reduced motion →
  * all frames shown static.
  */
 
 type Endpoint = { method: string; path: string; what: string; mono?: boolean };
 const ENDPOINTS: Endpoint[] = [
-  { method: "GET", path: "/stream", what: "Live trace of every agent action, desk-tagged · ?desk= · ?replay=<case>", mono: true },
-  { method: "GET", path: "/cases · /cases/{id}", what: "List cases / one case in full (state, verdict, features, events)" },
-  { method: "GET", path: "/cases/{id}/audit", what: "Hash-chain ledger rows + a freshly recomputed verified flag" },
-  { method: "GET", path: "/rules · /stats", what: "Current rulebook / headline counts (flagged, escalated, active rules)" },
-  { method: "POST", path: "/cases/{id}/confirm", what: "Human confirms escalation → derive + prove + codify a rule → FLAGGED" },
-  { method: "POST", path: "/cases/{id}/reject", what: "Human dismisses escalation → case CLOSED, no rule written" },
-  { method: "POST", path: "/demo/beat-a · /beat-b · /rnd", what: "One-click triggers for the two beats and a live adversary run" },
+  { method: "GET", path: "/api/v1/stream", what: "Live event feed, node-tagged · encrypt/token/sphinx/deliver/decrypt/reassemble/directory/error", mono: true },
+  { method: "GET", path: "/api/v1/agent/me · /peers", what: "This node's identity / known peers and their ratchet keys" },
+  { method: "GET", path: "/api/v1/status · /relays", what: "Node status (packet_payload_bytes, max_msg_len) / the K-of-N attested relay directory" },
+  { method: "GET", path: "/api/v1/messages · /messages/{id}", what: "List messages / one message in full (state, hops, chunks)" },
+  { method: "GET", path: "/api/v1/stats", what: "Headline counts (sent, delivered, tokens spent, relays known)" },
+  { method: "POST", path: "/api/v1/messages", what: "Send: chunks into Sphinx packets, spends one token per packet" },
+  { method: "POST", path: "/api/v1/ratchet/init · /tokens/issue", what: "Init a ratchet session with a peer / mine PoW and issue a token batch" },
 ];
 
-type Frame = { agent: string; model: string; desk: "surveillance" | "rnd"; content: string; t: string };
+type Frame = { kind: string; hop: string; side: "local" | "wire"; content: string; t: string };
 const FRAMES: Frame[] = [
-  { agent: "Adversary", model: "Qwen3-Next-80B", desk: "rnd", content: "emitted layering scenario · Market #0", t: "09:41:00" },
-  { agent: "AnomalyDetector", model: "deterministic", desk: "surveillance", content: "features · cancel_to_fill=0.94 depth=5", t: "09:41:02" },
-  { agent: "Investigator", model: "Qwen3-Next-80B", desk: "surveillance", content: "▓ waiting on Band ▓ recruit @layer-spec", t: "09:41:04" },
-  { agent: "Prosecution", model: "claude-sonnet-4-6", desk: "surveillance", content: "layered bids withdrawn pre-fill - intent to deceive", t: "09:41:07" },
-  { agent: "RuleEngine", model: "deterministic", desk: "surveillance", content: "VERDICT PASS - 400ms slips the 100ms window", t: "09:41:09" },
-  { agent: "EscalationManager", model: "gpt-5-mini", desk: "surveillance", content: "ESCALATION → human · recommend confirm", t: "09:41:10" },
+  { kind: "token", hop: "sender", side: "local", content: "admission token spent · 1/packet", t: "09:41:00" },
+  { kind: "encrypt", hop: "sender", side: "local", content: "ratchet seals body · 305 B", t: "09:41:01" },
+  { kind: "sphinx", hop: "entry", side: "wire", content: "layer peeled · forward → middle", t: "09:41:02" },
+  { kind: "sphinx", hop: "middle", side: "wire", content: "layer peeled · forward → exit", t: "09:41:04" },
+  { kind: "sphinx", hop: "exit", side: "wire", content: "final layer peeled · forward → recipient", t: "09:41:06" },
+  { kind: "deliver", hop: "recipient", side: "wire", content: "reorder window closed · DELIVERED", t: "09:41:08" },
 ];
 
-function deskTone(desk: string) {
-  return desk === "rnd" ? "var(--desk-rnd)" : "var(--desk-surv)";
+function sideTone(side: string) {
+  return side === "local" ? "var(--desk-rnd)" : "var(--desk-surv)";
 }
 
 function StreamPanel({ reduce }: { reduce: boolean }) {
@@ -54,7 +54,7 @@ function StreamPanel({ reduce }: { reduce: boolean }) {
     >
       <div className="flex items-center justify-between border-b px-4 py-2.5" style={{ borderColor: "var(--hairline)" }}>
         <span className="font-mono text-[10px] uppercase tracking-[0.18em]" style={{ color: "var(--desk-surv)" }}>
-          GET /stream · text/event-stream
+          GET /api/v1/stream · text/event-stream
         </span>
         <span className="flex items-center gap-1.5 font-mono text-[9.5px] uppercase tracking-[0.14em]" style={{ color: "var(--text-muted)" }}>
           <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: "var(--verdict-pass)" }} />
@@ -65,7 +65,7 @@ function StreamPanel({ reduce }: { reduce: boolean }) {
         <AnimatePresence initial={false}>
           {shown.map((f) => (
             <motion.div
-              key={`${f.agent}-${f.t}`}
+              key={`${f.kind}-${f.t}`}
               initial={reduce ? false : { opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35 }}
@@ -73,12 +73,12 @@ function StreamPanel({ reduce }: { reduce: boolean }) {
               style={{ borderColor: "var(--hairline)", backgroundColor: "var(--bg-card)" }}
             >
               <div className="flex items-center justify-between gap-2">
-                <span style={{ color: deskTone(f.desk) }}>{f.agent}</span>
+                <span style={{ color: sideTone(f.side) }}>{f.kind}</span>
                 <span style={{ color: "var(--text-faint)" }}>{f.t}</span>
               </div>
               <div className="mt-1 flex items-baseline gap-2">
-                <span className="shrink-0 text-[9.5px]" style={{ color: f.model === "deterministic" ? "var(--verdict-escalate)" : "var(--text-muted)" }}>
-                  {f.model}
+                <span className="shrink-0 text-[9.5px]" style={{ color: "var(--verdict-escalate)" }}>
+                  {f.hop}
                 </span>
                 <span style={{ color: "var(--text-body)" }}>{f.content}</span>
               </div>
@@ -87,7 +87,7 @@ function StreamPanel({ reduce }: { reduce: boolean }) {
         </AnimatePresence>
       </div>
       <div className="border-t px-4 py-2 font-mono text-[9.5px]" style={{ borderColor: "var(--hairline)", color: "var(--text-faint)" }}>
-        { "{ agent_name · model_id · desk · content · reasoning=null · tool_calls · created_at }" }
+        { "{ kind · node · hop · content · created_at }" }
       </div>
     </div>
   );
@@ -103,7 +103,7 @@ export function ServerSurface() {
     >
       <Reveal>
         <span className="font-mono text-[11px] uppercase tracking-[0.18em]" style={{ color: "var(--text-muted)" }}>
-          The server surface · §10
+          The server surface
         </span>
       </Reveal>
       <MaskLines
@@ -111,7 +111,7 @@ export function ServerSurface() {
         lineClassName="text-[clamp(28px,4vw,48px)] font-light tracking-[-0.02em] leading-[1.06]"
         lines={[
           <span key="l1" id="desk-server-title" style={{ color: "var(--text-primary)" }}>
-            A small FastAPI service.
+            A small Rust daemon.
           </span>,
           <span key="l2" style={{ color: "var(--text-faint)" }}>
             One live stream.
@@ -120,10 +120,10 @@ export function ServerSurface() {
       />
       <Reveal delay={0.08}>
         <p className="mt-6 max-w-2xl font-sans" style={{ fontSize: 15, lineHeight: 1.6, color: "var(--text-body)" }}>
-          The frontend talks to the backend through a handful of REST endpoints
-          plus one live event stream - and that stream is the spine of the
-          dashboard. One small JSON frame per agent action is all the UI needs to
-          draw the whole trace.
+          The frontend talks to warren serve through a handful of REST
+          endpoints plus one live event stream - and that stream is the spine
+          of the desk. One small JSON frame per protocol event is all the UI
+          needs to draw the whole trace.
         </p>
       </Reveal>
 

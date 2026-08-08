@@ -4,20 +4,20 @@ import { Reveal } from "@/components/anim/Reveal";
 import { MaskLines } from "@/components/anim/MaskLines";
 
 /**
- * RunningItLive - report §14 / D13. The runtime layout (browser · Next.js :4100 ·
- * FastAPI :8000 · Band + model providers) and the exact commands to run it,
- * keyless or full-live. Reveal-on-scroll; terminal-styled command blocks.
+ * RunningItLive - the runtime layout (browser · Next.js :3000 · warren serve
+ * :8800 · mix relays + directory keys) and the exact commands to run it, all
+ * on localhost. Reveal-on-scroll; terminal-styled command blocks.
  */
 
 type Node = { title: string; sub: string; tone: string };
 const RUNTIME: Node[] = [
   { title: "Browser", sub: "Command Center", tone: "var(--text-primary)" },
-  { title: "Next.js", sub: ":4100", tone: "var(--desk-surv)" },
-  { title: "FastAPI", sub: ":8000", tone: "var(--verdict-escalate)" },
+  { title: "Next.js", sub: ":3000", tone: "var(--desk-surv)" },
+  { title: "warren serve", sub: ":8800", tone: "var(--verdict-escalate)" },
 ];
 const EXTERNAL: Node[] = [
-  { title: "Band", sub: "mock or real", tone: "var(--band-blue)" },
-  { title: "Model providers", sub: "AIML · Featherless", tone: "var(--desk-rnd)" },
+  { title: "Mix relays", sub: "entry · middle · exit", tone: "var(--band-blue)" },
+  { title: "Directory keys", sub: "K-of-N signers", tone: "var(--desk-rnd)" },
 ];
 
 function NodeBox({ n }: { n: Node }) {
@@ -59,7 +59,7 @@ export function RunningItLive() {
     >
       <Reveal>
         <span className="font-mono text-[11px] uppercase tracking-[0.18em]" style={{ color: "var(--text-muted)" }}>
-          Running it live · §14 · D13
+          Running it live
         </span>
       </Reveal>
       <MaskLines
@@ -70,15 +70,15 @@ export function RunningItLive() {
             Three moving parts.
           </span>,
           <span key="l2" style={{ color: "var(--text-faint)" }}>
-            Keyless in two commands.
+            Live on your own machine.
           </span>,
         ]}
       />
       <Reveal delay={0.08}>
         <p className="mt-6 max-w-2xl font-sans" style={{ fontSize: 15, lineHeight: 1.6, color: "var(--text-body)" }}>
-          The browser, the backend, and the outside services it calls. For a quick
-          demo you can skip the outside services entirely - mock Band + recorded
-          fixtures look identical to a live replay.
+          The browser, the local warren serve daemon, and the mix relays it
+          routes through. For a quick demo you can run all three relays and
+          your own daemon on localhost.
         </p>
       </Reveal>
 
@@ -100,7 +100,7 @@ export function RunningItLive() {
           {/* external services branch */}
           <div className="mt-5 flex flex-col items-center gap-3 md:flex-row md:justify-end md:gap-4">
             <span className="font-mono text-[10px] uppercase tracking-[0.14em]" style={{ color: "var(--text-faint)" }}>
-              FastAPI calls out ›
+              warren serve calls out ›
             </span>
             {EXTERNAL.map((n) => (
               <NodeBox key={n.title} n={n} />
@@ -113,20 +113,22 @@ export function RunningItLive() {
       <div className="mt-8 grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Reveal delay={0.05}>
           <Term
-            title="backend · serves :8000"
+            title="relays + warren serve"
             lines={[
-              { c: "# leave USE_REAL_BAND=false for the keyless demo", comment: true },
-              { c: "cd alpha-oversight" },
-              { c: "make run-backend" },
+              { c: "# 3 relays; only entry needs the admission key", comment: true },
+              { c: "cargo build --release" },
+              { c: "warren relay --start --admit-key entry.pem --port 7001" },
+              { c: "warren relay --start --port 7002   # middle" },
+              { c: "warren relay --start --port 7003   # exit" },
+              { c: "warren serve --port 8800" },
             ]}
           />
         </Reveal>
         <Reveal delay={0.1}>
           <Term
-            title="frontend · serves :4100"
+            title="frontend · serves :3000"
             lines={[
-              { c: "# .env.local: NEXT_PUBLIC_DATA_MODE=live  (or mock)", comment: true },
-              { c: "#             NEXT_PUBLIC_API_BASE=http://localhost:8000", comment: true },
+              { c: "# .env.local: NEXT_PUBLIC_API_BASE=http://127.0.0.1:8800", comment: true },
               { c: "npm install && npm run dev" },
             ]}
           />
@@ -136,9 +138,9 @@ export function RunningItLive() {
       <Reveal delay={0.05}>
         <div className="mt-6 flex flex-col gap-3 rounded-[var(--r-card)] border p-5 sm:flex-row sm:items-center sm:justify-between" style={{ borderColor: "var(--hairline)", backgroundColor: "var(--bg-card)" }}>
           <p className="font-sans text-[13.5px]" style={{ color: "var(--text-body)", lineHeight: 1.55 }}>
-            <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>Mock mode needs nothing but the frontend</span> - it
-            replays bundled fixtures and looks identical to a live replay. Full
-            adversary runs additionally need the model-provider keys.
+            <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>Every relay is safe to expose publicly</span> - no
+            secrets, that's the point of a mixnet. warren serve is the opposite:
+            loopback-only, holds an unlocked wallet, runs on your own machine.
           </p>
           <a
             href="#live-desk"

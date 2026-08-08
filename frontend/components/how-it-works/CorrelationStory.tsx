@@ -33,9 +33,9 @@ import {
 } from "./evasion/stage";
 
 /**
- * EvasionStory - the centerpiece pinned scroll-story for /how-it-works.
+ * CorrelationStory - the centerpiece pinned scroll-story for /how-it-works.
  *
- * One morphing SVG stage (the order/time lane) driven by scroll progress through
+ * One morphing SVG stage (the wire/time lane) driven by scroll progress through
  * SIX chapters. A tall runway creates the scroll distance; a sticky stage holds
  * the canvas + overlays for the duration. `useScroll` over the runway →
  * `useSpring` smooths the raw progress → every visual is a `useTransform` of the
@@ -43,22 +43,23 @@ import {
  * phase indicator + progress rail (PhaseRail).
  *
  * The page is LIGHT; the stage panel + cards are DARK glass so the semantic
- * accents glow. `--band-blue` (chapter 3) means "waiting on Band" and nothing
+ * accents glow. `--band-blue` (chapter 3) means "crossing a hop" and nothing
  * else.
  *
- * Reduced motion → renders the FINAL chapter state statically (codified window
- * 450ms, cluster INSIDE → FLAG ✓, rules 5), no scroll animation.
+ * Reduced motion → renders the FINAL chapter state statically (widest guessed
+ * window, burst still unconfirmed, 0.94 confidence with no receipt), no scroll
+ * animation.
  *
  * Six chapter centers on the 0..1 timeline (i+0.5)/6:
- *   1 Clean flow · 2 Adversary's move · 3 Across the Band · 4 The debate ·
- *   5 The verdict · 6 Codify.
+ *   1 Ordinary traffic · 2 Composing · 3 Through the mix ·
+ *   4 The observer's dilemma · 5 Delivery · 6 What the observer is left with.
  */
 
 const N = 6;
 const c = (i: number) => (i + 0.5) / N; // chapter center (0-indexed)
 const HALF = 0.5 / N;
 
-export function EvasionStory() {
+export function CorrelationStory() {
   const reduce = useReducedMotion();
   const isMobile = useIsMobile();
   const runwayRef = useRef<HTMLDivElement | null>(null);
@@ -84,7 +85,7 @@ export function EvasionStory() {
 
   if (reduce) {
     return (
-      <section aria-label="The Evasion" className="relative">
+      <section aria-label="The Observer" className="relative">
         <div className="mx-auto w-full max-w-[var(--maxw-content)] px-6 py-16 sm:px-10">
           <SplitFrame
             narrative={<NarrativeColumn t={tStatic} />}
@@ -100,7 +101,7 @@ export function EvasionStory() {
   }
 
   return (
-    <section aria-label="The Evasion" className="relative">
+    <section aria-label="The Observer" className="relative">
       {/* Runway - its height is the scroll distance the story plays over. */}
       <div ref={runwayRef} className="relative h-[620vh]">
         {/* Sticky stage - pinned below the 72px header for the duration. */}
@@ -187,7 +188,7 @@ function NarrativeColumn({ t }: { t: MotionValue<number> }) {
     <div className="flex h-full flex-col p-5 sm:p-6">
       <div className="flex items-center justify-between">
         <span className="font-mono text-[10px] uppercase tracking-[0.24em] text-[var(--desk-surv)]">
-          The Evasion
+          The Observer
         </span>
         <StepCounter t={t} />
       </div>
@@ -354,12 +355,12 @@ function MorphStage({ t }: { t: MotionValue<number> }) {
   const needleY = useTransform(ratio, (r) => ratioY(r));
   const barHeight = useTransform(needleY, (y) => GAUGE.bottom - y);
 
-  /* ── Chinese wall sweep: chapter 3 ── */
-  // wall wipes left→right across the cluster
+  /* ── hop-boundary sweep: chapter 3 ── */
+  // boundary wipes left→right across the burst
   const wallProgress = useTransform(t, [c(2) - HALF, c(2)], [0, 1]);
   const wallX = useTransform(wallProgress, [0, 1], [-40, VIEW_W + 40]);
   const wallOpacity = useTransform(t, [c(2) - HALF, c(2), c(2) + HALF], [0, 0.9, 0]);
-  // investigator marker turns band-blue once the case crosses (chapter 3 on)
+  // relay marker turns band-blue once the packet crosses (chapter 3 on)
   const bandOn = useTransform(t, [c(2) - 0.2 * HALF, c(2)], [0, 1]);
 
   /* ── rule-window bracket: quivers between candidates (ch4) → seed (ch5) →
@@ -565,14 +566,14 @@ function MorphStage({ t }: { t: MotionValue<number> }) {
           style={{ opacity: clusterReveal, fill: clusterStroke }}
           letterSpacing="0.06em"
         >
-          cancel cluster · 400ms
+          packet burst · 400ms
         </motion.text>
       </g>
 
-      {/* ── investigator marker (waiting-on-Band, ch3) ── */}
-      <InvestigatorMarker bandOn={bandOn} />
+      {/* ── relay marker (crossing-the-mix, ch3) ── */}
+      <RelayMarker bandOn={bandOn} />
 
-      {/* ── cancel_to_fill ratio gauge (right column) ── */}
+      {/* ── correlation confidence gauge (right column) ── */}
       <g>
         <text
           x={GAUGE.x + GAUGE.width / 2}
@@ -583,7 +584,7 @@ function MorphStage({ t }: { t: MotionValue<number> }) {
           fill="var(--text-muted)"
           letterSpacing="0.08em"
         >
-          cancel_to_fill
+          confidence
         </text>
         {/* gauge track */}
         <rect
@@ -636,7 +637,7 @@ function MorphStage({ t }: { t: MotionValue<number> }) {
         <RatioLabel ratio={ratio} stroke={gaugeTone} />
       </g>
 
-      {/* ── Chinese-wall divider sweep (ch3) ── */}
+      {/* ── hop-boundary divider sweep (ch3) ── */}
       <motion.g style={{ opacity: wallOpacity }}>
         <motion.line
           x1={wallX}
@@ -689,8 +690,8 @@ function CancelMark({
   );
 }
 
-/* Investigator node that turns band-blue ("waiting on Band") in chapter 3. */
-function InvestigatorMarker({ bandOn }: { bandOn: MotionValue<number> }) {
+/* Relay node that turns band-blue ("crossing the mix") in chapter 3. */
+function RelayMarker({ bandOn }: { bandOn: MotionValue<number> }) {
   const fill = useTransform<number, string>(bandOn, [0, 1], ["var(--desk-surv)", "var(--band-blue)"]);
   const labelOpacity = useTransform(bandOn, [0.5, 1], [0, 1]);
   // breathing halo
@@ -724,7 +725,7 @@ function InvestigatorMarker({ bandOn }: { bandOn: MotionValue<number> }) {
         style={{ opacity: labelOpacity }}
         letterSpacing="0.04em"
       >
-        ▓ waiting on Band ▓
+        ▓ crossing the mix ▓
       </motion.text>
       <text
         x={ix}
@@ -735,7 +736,7 @@ function InvestigatorMarker({ bandOn }: { bandOn: MotionValue<number> }) {
         fill="var(--text-muted)"
         letterSpacing="0.1em"
       >
-        INVESTIGATOR
+        RELAY
       </text>
     </g>
   );
@@ -795,10 +796,10 @@ function MetricsStrip({ t }: { t: MotionValue<number> }) {
   );
   const windowText = useTransform(windowMs, (v) => `${Math.round(v)}ms`);
 
-  // verdict: blank → (ch5) PASS escalate amber → (ch6) FLAG red
+  // match: blank → (ch5) delivered amber → (ch6) confident-but-unconfirmed red
   const verdict = useTransform(t, (v): string => {
-    if (v >= c(5) - 0.2 * HALF) return "FLAG ✓";
-    if (v >= c(4) - HALF) return "PASS → ESC";
+    if (v >= c(5) - 0.2 * HALF) return "0.94 · unconfirmed";
+    if (v >= c(4) - HALF) return "DELIVERED";
     return "-";
   });
   const verdictTone = useTransform(t, (v): string => {
@@ -807,7 +808,7 @@ function MetricsStrip({ t }: { t: MotionValue<number> }) {
     return "var(--text-faint)";
   });
   const rules = useTransform(t, [c(5) - 0.3 * HALF, c(5)], [4, 5]);
-  const rulesText = useTransform(rules, (v): string => (v < 4.5 ? "4" : "4 ▸ 5"));
+  const rulesText = useTransform(rules, (v): string => (v < 4.5 ? "2/3" : "3/3"));
 
   return (
     <div
@@ -819,16 +820,16 @@ function MetricsStrip({ t }: { t: MotionValue<number> }) {
           className="inline-block h-1.5 w-1.5 rounded-full"
           style={{ backgroundColor: "var(--verdict-pass)" }}
         />
-        live · market #0
+        live · flow #0
       </span>
       {/* metrics wrap to their own full-width row under the live badge so the
           five label+value cells never collide on a narrow graph column */}
       <span className="flex w-full flex-wrap items-center gap-x-3.5 gap-y-1">
-        <MetricCell label="cancel_rate" value={<motion.span>{ratioText}</motion.span>} tone={ratioTone} />
-        <MetricCell label="depth" value={<motion.span>{depthText}</motion.span>} />
+        <MetricCell label="confidence" value={<motion.span>{ratioText}</motion.span>} tone={ratioTone} />
+        <MetricCell label="packets" value={<motion.span>{depthText}</motion.span>} />
         <MetricCell label="window" value={<motion.span>{windowText}</motion.span>} />
-        <MetricCell label="verdict" value={<motion.span>{verdict}</motion.span>} tone={verdictTone} />
-        <MetricCell label="rules" value={<motion.span>{rulesText}</motion.span>} />
+        <MetricCell label="match" value={<motion.span>{verdict}</motion.span>} tone={verdictTone} />
+        <MetricCell label="hops_peeled" value={<motion.span>{rulesText}</motion.span>} />
       </span>
     </div>
   );
@@ -851,82 +852,82 @@ type Chapter = {
 const CHAPTERS: Chapter[] = [
   {
     no: 1,
-    eyebrow: "Clean flow",
-    agent: "Anomaly Detector · open model",
+    eyebrow: "Ordinary traffic",
+    agent: "Wire observer · passive",
     title: (
       <>
-        Surveillance watches every order.{" "}
-        <span className="text-[var(--text-muted)]">Most flow is benign.</span>
+        An observer watches every packet.{" "}
+        <span className="text-[var(--text-muted)]">Most traffic looks identical.</span>
       </>
     ),
-    body: "The Anomaly Detector takes the first glance - computing the hard features (cancel-to-fill, book depth, self-match). At 0.08 nothing trips the rulebook, so the case closes clean.",
+    body: "A passive observer logs every packet's size and timing. At this point nothing stands out - real sends and cover chaff are shaped the same on the wire.",
   },
   {
     no: 2,
-    eyebrow: "The adversary's move",
-    agent: "R&D Adversary · open model",
+    eyebrow: "Composing",
+    agent: "Sender · local client",
     title: (
       <>
-        The R&amp;D red team plants the evasion.{" "}
-        <span className="text-[var(--text-muted)]">A 400ms cancel cluster forms.</span>
+        The sender chunks and sends.{" "}
+        <span className="text-[var(--text-muted)]">A tight burst forms.</span>
       </>
     ),
-    body: "Orders placed only to be pulled - layering the book to mislead. Cancel-to-fill spikes to 0.94, and two deterministic referees confirm it both evades the rulebook and profits before it may cross the wall.",
-    chip: { label: "ADVERSARY · 400ms layering-evasion · Market #0", tone: "var(--desk-rnd)" },
+    body: "The message splits into Sphinx packets, one admission token minted per packet. Timing correlation spikes to 0.94 in the observer's log - a burst like this is exactly the pattern a passive correlation attack looks for.",
+    chip: { label: "SENDER · 400ms packet burst · flow #0", tone: "var(--desk-rnd)" },
   },
   {
     no: 3,
-    eyebrow: "Across the Band",
-    agent: "SanitizedBridge → Investigator",
+    eyebrow: "Through the mix",
+    agent: "Entry relay → next hop",
     title: (
       <>
-        The case crosses the Chinese wall.{" "}
-        <span className="text-[var(--text-muted)]">Only sanitized events pass.</span>
+        The packet crosses the first hop.{" "}
+        <span className="text-[var(--text-muted)]">Only the next address survives.</span>
       </>
     ),
-    body: "The SanitizedBridge strips the adversary's reasoning and even its model - only raw order events cross. Surveillance picks them up; the Investigator turns blue, waiting on Band as it recruits a specialist.",
-    chip: { label: "▓ waiting on Band ▓", tone: "var(--band-blue)" },
+    body: "Each relay peels one Sphinx layer and forwards blind - it never learns where the packet came from or where it's ultimately headed. The observer's view ends at this boundary too: it can see packets enter a relay and packets leave, but not which is which.",
+    chip: { label: "▓ crossing the mix ▓", tone: "var(--band-blue)" },
   },
   {
     no: 4,
-    eyebrow: "The debate",
-    agent: "Specialist → Prosecution ⚔ Defense",
+    eyebrow: "The observer's dilemma",
+    agent: "Wire observer · guessing",
     title: (
       <>
-        Prosecution ⚔ Defense.{" "}
-        <span className="text-[var(--text-muted)]">They contest the window.</span>
+        Too narrow misses the real packet.{" "}
+        <span className="text-[var(--text-muted)]">Too wide catches everyone.</span>
       </>
     ),
-    body: "The Specialist proposes the contested inputs; a frontier Prosecution argues a wide window, an open-weight Defense argues tight. The bracket quivers until the Adjudicator settles one conservative set of numbers.",
-    chip: { label: "frontier ⚔ open · contesting the window", tone: "var(--tier-frontier)" },
+    body: "Per-hop delay is drawn from an exponential distribution, so the observer has to guess a correlation window. Guess narrow and the real, delayed packet falls outside it. Guess wide and cover traffic floods back in - dozens of equally plausible matches, no way to tell which one is real.",
+    chip: { label: "narrow ⚔ wide · guessing the delay window", tone: "var(--tier-frontier)" },
   },
   {
     no: 5,
-    eyebrow: "The verdict",
-    agent: "Rule Engine · deterministic",
+    eyebrow: "Delivery",
+    agent: "Recipient · ratchet",
     title: (
       <>
-        The deterministic rule draws 100ms.{" "}
-        <span className="text-[var(--text-muted)]">The cluster sits outside.</span>
+        The message arrives.{" "}
+        <span className="text-[var(--text-muted)]">The sender never finds out.</span>
       </>
     ),
-    body: "The seed rule FINRA-5210-layering scores PASS - the 400ms evasion slips its 100ms window. No LLM can overrule the engine, so the case ESCALATES to a human.",
-    chip: { label: "PASS (rules missed) → ESCALATE", tone: "var(--verdict-escalate)" },
+    body: "The recipient's ratchet decrypts and the reorder buffer reassembles the chunks. The state machine stops at DELIVERED - there's no ACKNOWLEDGED step, because a receipt traveling back would hand the observer exactly the correlation it's been guessing at.",
+    chip: { label: "QUEUED → DELIVERED · no receipt", tone: "var(--verdict-escalate)" },
   },
   {
     no: 6,
-    eyebrow: "Codify",
-    agent: "Human confirm → RULE_CODIFIED",
+    eyebrow: "What the observer is left with",
+    agent: "Wire observer · unconfirmed",
     title: (
       <>
-        The system learns.{" "}
+        A confident guess.{" "}
         <span className="text-[var(--text-muted)]">
-          That evasion can never evade again.
+          Never a proof.
         </span>
       </>
     ),
-    body: "The human confirms. A new rule is derived and regression-gated - replayed against the original evasion until it FLAGs - then codified. The rulebook grows 4 ▸ 5 and a RULE_CODIFIED message goes out on Band.",
-    chip: { label: "FLAG ✓ · regression gate PASS · rules 4 ▸ 5", tone: "var(--verdict-flag)" },
+    body: "The observer's log still shows that 0.94 correlation and a window that could plausibly fit. It looks damning. But circumstantial timing evidence isn't a receipt, and Warren never sends one back - the match stays a guess the observer can never confirm, for this message or the next one.",
+    chip: { label: "0.94 confidence · unconfirmed", tone: "var(--verdict-flag)" },
   },
 ];
 
@@ -952,12 +953,12 @@ function StaticFinalStage() {
           </text>
         </g>
       ))}
-      {/* codified window (450ms) - cluster INSIDE → FLAG */}
+      {/* widest guessed correlation window - burst still unconfirmed */}
       <rect x={left} y={LANE.y - 96} width={w} height={192} rx={6} fill="rgba(239,68,68,0.07)" stroke="var(--verdict-flag)" strokeWidth={1.25} strokeDasharray="5 4" />
       <text x={tx(CLUSTER_CENTER_MS)} y={LANE.y - 108} textAnchor="middle" className="font-mono" fontSize={11} fill="var(--verdict-flag)">
         window 450ms
       </text>
-      {/* cancel cluster - FLAG red */}
+      {/* packet burst - unconfirmed, shown red (what the observer flags) */}
       {CANCEL_XS.map((x, i) => (
         <g key={i}>
           <line x1={x - 7} y1={LANE.y - 7} x2={x + 7} y2={LANE.y + 7} stroke="var(--verdict-flag)" strokeWidth={2.2} strokeLinecap="round" />
@@ -966,9 +967,9 @@ function StaticFinalStage() {
       ))}
       <line x1={tx(CLUSTER.startMs)} y1={LANE.y + 60} x2={tx(CLUSTER.endMs)} y2={LANE.y + 60} stroke="var(--verdict-flag)" strokeWidth={1.5} />
       <text x={tx(CLUSTER_CENTER_MS)} y={LANE.y + 76} textAnchor="middle" className="font-mono" fontSize={10} fill="var(--verdict-flag)">
-        cancel cluster · 400ms · FLAG ✓
+        packet burst · 400ms · unconfirmed
       </text>
-      {/* ratio gauge at evasion level */}
+      {/* confidence gauge at its final high-but-unconfirmed level */}
       <rect x={GAUGE.x} y={GAUGE.top} width={GAUGE.width} height={GAUGE.bottom - GAUGE.top} rx={6} fill="rgba(255,255,255,0.03)" stroke="var(--hairline)" strokeWidth={1} />
       <rect x={GAUGE.x + 1} y={ratioY(RATIO.evasion)} width={GAUGE.width - 2} height={GAUGE.bottom - ratioY(RATIO.evasion)} rx={5} fill="var(--verdict-flag)" opacity={0.85} />
       <text x={GAUGE.x + GAUGE.width / 2} y={GAUGE.bottom + 22} textAnchor="middle" className="font-mono" fontSize={15} fill="var(--verdict-flag)">
@@ -984,7 +985,7 @@ function StaticFinalStage() {
    ════════════════════════════════════════════════════════════════════════ */
 function MobileStory() {
   return (
-    <section aria-label="The Evasion" className="relative">
+    <section aria-label="The Observer" className="relative">
       <div className="mx-auto w-full max-w-[var(--maxw-content)] px-4 py-10 sm:px-8 sm:py-14">
         <StageFrame>
           <StaticFinalStage />
@@ -1054,4 +1055,4 @@ function MobileStory() {
   );
 }
 
-export default EvasionStory;
+export default CorrelationStory;

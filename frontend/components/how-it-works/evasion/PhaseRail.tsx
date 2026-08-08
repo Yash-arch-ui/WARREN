@@ -11,12 +11,12 @@ import { motion, useTransform, type MotionValue } from "framer-motion";
  */
 
 export const CHAPTERS = [
-  "Clean flow",
-  "The adversary's move",
-  "Across the Band",
-  "The debate",
-  "The verdict",
-  "Codify",
+  "Ordinary traffic",
+  "Composing",
+  "Through the mix",
+  "The observer's dilemma",
+  "Delivery",
+  "What the observer is left with",
 ] as const;
 
 /** Progress center for chapter i (0..5) on the 0..1 timeline. */
@@ -82,7 +82,7 @@ export function PhaseRail({ t, staticActive }: PhaseRailProps) {
         className="pointer-events-none absolute left-5 top-5 hidden flex-col gap-2 sm:left-7 sm:top-7 sm:flex"
       >
         <span className="mb-1 font-mono text-[9.5px] uppercase tracking-[0.24em] text-[var(--desk-surv)]">
-          The Evasion
+          The Observer
         </span>
         {CHAPTERS.map((label, i) => (
           <PhaseItem key={label} t={t} i={i} label={label} staticActive={staticActive} />

@@ -1,13 +1,13 @@
 "use client";
 
 /**
- * D4 - who decides the verdict (report Fig 4). LLMs set inputs; code decides.
- * Three inputs feed the deterministic engine - order events, the resolved inputs
- * the debate set, and the active registry rules. The gold EngineNode is the sole
- * authority: for each active rule in order it runs the family metric, and the
- * first rule that trips wins → FLAG with a cited metric, else PASS. Self-draws on
- * scroll-into-view; no band-blue here (nothing is on Band - this is local engine
- * math). Dark "ops" stage.
+ * D4 - the delivery state machine (Fig 5). The state machine only ever moves
+ * forward. Three inputs feed it - the encrypted packet, its chunk position in
+ * the reorder window, and the ratchet session - and the gold EngineNode is the
+ * sole authority: it advances QUEUED → ENCRYPTED → IN_FLIGHT → DELIVERED (or
+ * FAILED), and stops there. Self-draws on scroll-into-view; no band-blue here
+ * (nothing here re-crosses the wire - this is local recipient-side state).
+ * Dark "ops" stage.
  */
 
 import { motion } from "framer-motion";
@@ -30,9 +30,9 @@ const IN_X = 40;
 const IN_W = 268;
 const IN_H = 56;
 const IN_GAP = 22;
-const IN1_Y = 96; //  order events       (neutral)
-const IN2_Y = IN1_Y + IN_H + IN_GAP; // resolved inputs (surv)
-const IN3_Y = IN2_Y + IN_H + IN_GAP; // active rules    (neutral)
+const IN1_Y = 96; //  encrypted packet   (neutral)
+const IN2_Y = IN1_Y + IN_H + IN_GAP; // chunk position (surv)
+const IN3_Y = IN2_Y + IN_H + IN_GAP; // ratchet session (neutral)
 
 // process block (the deterministic for-each)
 const PROC_X = 380;
@@ -56,8 +56,8 @@ const DEC_RH = 70;
 const OUT_X = 940;
 const OUT_W = 132;
 const OUT_H = 50;
-const FLAG_Y = 120; // FLAG
-const PASS_Y = 352; // PASS
+const FLAG_Y = 120; // FAILED
+const PASS_Y = 352; // DELIVERED
 
 /* ── a labelled process block: a neutral rect + stacked mono step lines ───── */
 function ProcessBlock({
@@ -70,11 +70,11 @@ function ProcessBlock({
   delay: number;
 }) {
   const lines = [
-    "for each active rule, in order:",
-    "  run the family metric",
-    "    spoofing · layering · wash · marking",
-    "  overlay the resolved window",
-    "first rule that trips wins",
+    "state machine, in order:",
+    "  QUEUED → ENCRYPTED",
+    "  ENCRYPTED → IN_FLIGHT",
+    "  IN_FLIGHT → DELIVERED or FAILED",
+    "no ACKNOWLEDGED state - ever",
   ];
   return (
     <motion.g
@@ -101,7 +101,7 @@ function ProcessBlock({
         letterSpacing="0.14em"
         fill="var(--text-muted)"
       >
-        DETERMINISTIC EVALUATION
+        DELIVERY STATE MACHINE
       </text>
       <line
         x1={PROC_X + 20}
@@ -147,7 +147,7 @@ export function VerdictDiagram({ className = "" }: { className?: string }) {
       className={className}
       viewBox={VB}
       amount={0.3}
-      label="Alpha & Oversight verdict path: three inputs - the order events, the resolved inputs the LLM debate sets (time window, bona-fide order ids, intent), and the active registry rules - feed a deterministic evaluation block. The gold rule engine is the sole authority: for each active rule in order it runs the family metric (spoofing, layering, wash, marking) over the resolved window, and the first rule that trips wins. If any rule trips it returns FLAG with the rule id and the cited metric; if none trip the case PASSes. The models only set the contested inputs - the rule engine renders PASS or FLAG deterministically, the same answer for the same inputs every time, and no LLM overrules it."
+      label="Warren delivery state machine: three inputs - the encrypted packet, its chunk position in the reorder window, and the ratchet session - feed a deterministic state machine. The gold state machine is the sole authority: it advances QUEUED to ENCRYPTED to IN_FLIGHT to DELIVERED or FAILED, one direction only, and there is no ACKNOWLEDGED state. If the final chunk is received within the reorder window the message is DELIVERED; otherwise it FAILED. No receipt ever travels back to the sender - that silence is the design, not a gap in it."
     >
       {(show, reduce) => (
         <>
@@ -163,7 +163,7 @@ export function VerdictDiagram({ className = "" }: { className?: string }) {
             animate={show ? { opacity: 1 } : undefined}
             transition={{ duration: 0.4, ease: EASE }}
           >
-            LLMs ARGUE · CODE DECIDES
+            ONE-WAY · NO ACKNOWLEDGED STATE
           </motion.text>
 
           {/* ── inputs (left column) ────────────────────────────────── */}
@@ -172,8 +172,8 @@ export function VerdictDiagram({ className = "" }: { className?: string }) {
             y={IN1_Y}
             w={IN_W}
             h={IN_H}
-            title="Order events"
-            sub="PLACE · MODIFY · CANCEL · as observed"
+            title="Encrypted packet"
+            sub="Sphinx-unwrapped, still ratchet-sealed"
             tone="neutral"
             titleMono
             delay={0.1}
@@ -185,8 +185,8 @@ export function VerdictDiagram({ className = "" }: { className?: string }) {
             y={IN2_Y}
             w={IN_W}
             h={IN_H}
-            title="Resolved inputs"
-            sub="window_ms · bona-fide ids · intent"
+            title="Chunk position"
+            sub="seq · reorder window slot"
             tone="surv"
             titleMono
             delay={0.18}
@@ -198,8 +198,8 @@ export function VerdictDiagram({ className = "" }: { className?: string }) {
             y={IN3_Y}
             w={IN_W}
             h={IN_H}
-            title="Active rules (registry)"
-            sub="the live rulebook · 4 seed rules"
+            title="Ratchet session"
+            sub="Olm Double Ratchet keys"
             tone="neutral"
             titleMono
             delay={0.26}
@@ -207,11 +207,11 @@ export function VerdictDiagram({ className = "" }: { className?: string }) {
             reduce={reduce}
           />
 
-          {/* annotate that ONLY the resolved inputs come from the debate */}
+          {/* annotate that ONLY the chunk position depends on arrival order */}
           <Tag
             x={IN_X}
             y={IN3_Y + IN_H + 30}
-            text="↑ only these values come from the LLM debate"
+            text="↑ only the chunk position depends on arrival order"
             tone="surv"
             anchor="start"
             delay={0.42}
@@ -228,7 +228,8 @@ export function VerdictDiagram({ className = "" }: { className?: string }) {
             y={ENG_Y}
             w={ENG_W}
             h={ENG_H}
-            sub="sole PASS / FLAG authority · deterministic"
+            title="STATE MACHINE"
+            sub="sole delivery authority · deterministic"
             delay={0.5}
             show={show}
             reduce={reduce}
@@ -240,8 +241,8 @@ export function VerdictDiagram({ className = "" }: { className?: string }) {
             cy={DEC_CY}
             rw={DEC_RW}
             rh={DEC_RH}
-            title="any rule"
-            sub="trips?"
+            title="final chunk"
+            sub="received?"
             tone="neutral"
             delay={0.58}
             show={show}
@@ -254,7 +255,7 @@ export function VerdictDiagram({ className = "" }: { className?: string }) {
             y={FLAG_Y}
             w={OUT_W}
             h={OUT_H}
-            label="FLAG"
+            label="FAILED"
             tone="flag"
             delay={0.74}
             show={show}
@@ -263,7 +264,7 @@ export function VerdictDiagram({ className = "" }: { className?: string }) {
           <Tag
             x={OUT_X + OUT_W / 2}
             y={FLAG_Y + OUT_H + 20}
-            text="rule_id + cited metric"
+            text="reorder window expired"
             tone="flag"
             anchor="middle"
             delay={0.82}
@@ -275,7 +276,7 @@ export function VerdictDiagram({ className = "" }: { className?: string }) {
             y={PASS_Y}
             w={OUT_W}
             h={OUT_H}
-            label="PASS"
+            label="DELIVERED"
             tone="pass"
             delay={0.74}
             show={show}
@@ -284,7 +285,7 @@ export function VerdictDiagram({ className = "" }: { className?: string }) {
           <Tag
             x={OUT_X + OUT_W / 2}
             y={PASS_Y + OUT_H + 20}
-            text="no rule fired"
+            text="no receipt sent back"
             tone="pass"
             anchor="middle"
             delay={0.82}
@@ -321,50 +322,50 @@ export function VerdictDiagram({ className = "" }: { className?: string }) {
             reduce={reduce}
           />
 
-          {/* process → engine (the engine runs the evaluation) */}
+          {/* process → engine (the state machine advances) */}
           <Edge
             from={procBottom}
             to={engTop}
             mode="straight"
             tone="neutral"
-            label="run by"
+            label="advances"
             width={1.8}
             delay={0.54}
             show={show}
             reduce={reduce}
           />
 
-          {/* engine → branch (the engine's decision) */}
+          {/* engine → branch (the state machine's resolution) */}
           <Edge
             from={{ x: ENG_X + ENG_W, y: ENG_Y + ENG_H / 2 }}
             to={{ x: DEC_CX, y: DEC_CY + DEC_RH }}
             mode="mid-v"
             tone="neutral"
-            label="renders verdict"
+            label="resolves state"
             width={1.8}
             delay={0.62}
             show={show}
             reduce={reduce}
           />
 
-          {/* branch → FLAG (yes) */}
+          {/* branch → FAILED (no) */}
           <Edge
             from={{ x: DEC_CX, y: DEC_CY - DEC_RH }}
             to={{ x: OUT_X, y: FLAG_Y + OUT_H / 2 }}
             mode="vh"
             tone="flag"
-            label="yes"
+            label="no"
             delay={0.7}
             show={show}
             reduce={reduce}
           />
-          {/* branch → PASS (no) */}
+          {/* branch → DELIVERED (yes) */}
           <Edge
             from={{ x: DEC_CX + DEC_RW, y: DEC_CY }}
             to={{ x: OUT_X, y: PASS_Y + OUT_H / 2 }}
             mode="vh"
             tone="pass"
-            label="no"
+            label="yes"
             delay={0.7}
             show={show}
             reduce={reduce}
@@ -374,7 +375,7 @@ export function VerdictDiagram({ className = "" }: { className?: string }) {
           <Tag
             x={40}
             y={518}
-            text="The models only set the contested inputs. The rule engine renders PASS / FLAG deterministically -"
+            text="The state machine only ever moves forward. It renders DELIVERED / FAILED deterministically -"
             tone="neutral"
             anchor="start"
             delay={0.9}
@@ -384,7 +385,7 @@ export function VerdictDiagram({ className = "" }: { className?: string }) {
           <Tag
             x={40}
             y={538}
-            text="same inputs, same answer, every time. No LLM overrules it."
+            text="and stops there. No receipt ever travels back to the sender."
             tone="neutral"
             anchor="start"
             delay={0.96}

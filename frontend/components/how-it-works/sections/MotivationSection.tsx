@@ -1,10 +1,10 @@
 "use client";
 
 /**
- * §3.1 - "Why this exists". Light editorial section, no diagram. The forensic
+ * §1 - "Why this exists". Light editorial section, no diagram. The forensic
  * register: a mono eyebrow over a two-tone Fraunces headline, two paragraphs of
- * paste-ready report copy, and the four manipulation tactics surfaced as small
- * mono inline chips.
+ * copy, and the four traffic-analysis attacks surfaced as small mono inline
+ * chips.
  *
  * Motion (bolder than the prior subtle fades): the two body paragraphs now
  * "write themselves in" word-by-word, sweeping gray→ink as the section travels
@@ -30,7 +30,12 @@ const EASE = [0.16, 1, 0.3, 1] as [number, number, number, number];
 const GRAY = "var(--text-faint)";
 const INK = "var(--text-body)";
 
-const TACTICS = ["spoofing", "layering", "wash trading", "marking the close"] as const;
+const TACTICS = [
+  "timing correlation",
+  "volume correlation",
+  "endpoint compromise",
+  "exit surveillance",
+] as const;
 
 /** One word whose color fills gray→ink as the scroll progress passes its slice. */
 function FillWord({
@@ -122,16 +127,16 @@ export function MotivationSection() {
   const p2 = useTransform(scrollYProgress, [0.4, 1], [0, 1]);
 
   const PARA_1 =
-    "Markets can be rigged. A trader can post orders they never plan to fill to fake demand (spoofing), stack fake depth across price levels (layering), trade with themselves to invent volume (wash trading), or push the closing price to mark their own book. Regulators write rules against each of these, but the rules are fixed while the tactics keep moving - a small change to a known trick can slip a rule written for last year's version of it.";
+    "Encrypting a message hides its content, not its shape. A network can still watch who talks to whom, when, and how often - timing correlation matches a burst leaving one machine to a burst arriving at another, volume correlation matches message sizes across the wire, and a single compromised or coerced relay reopens the same problem for its own hop. None of that requires breaking a cipher.";
   const PARA_2 =
-    "Two obvious fixes both fall short. Writing new rules by hand is slow and always a step behind. Letting an AI model decide the verdict is worse: the decision becomes a black box a regulator can't audit and an opponent can try to talk its way past. Alpha & Oversight keeps the verdict deterministic and auditable, and lets the system write its own new rules the moment an old one is beaten.";
+    "The fix has to be structural, not procedural. A message crosses three independent hops, each holding one Sphinx layer and learning only the next address. Per-hop delay is drawn from an exponential distribution and cover traffic fills the gaps, so timing and volume stop carrying a usable signal. Weak links get closed on purpose too: no single directory key can vouch for the relay list (K-of-N attestation), and no delivery receipt ever travels back to the sender - a receipt would be exactly the correlation the design exists to prevent.";
 
   return (
     <section data-hiw="motivation" className="relative px-6 py-24 sm:py-32">
       <div className="mx-auto max-w-[var(--maxw-content)]">
         <Reveal>
           <p className="font-mono text-xs uppercase tracking-[0.2em] text-[color:var(--text-muted)]">
-            §3.1 · The problem
+            §1 · The problem
           </p>
         </Reveal>
 
@@ -143,7 +148,7 @@ export function MotivationSection() {
               Why this exists
             </span>,
             <span key="1" className="text-[color:var(--text-faint)]">
-              - the rules stand still, the tactics move.
+              - metadata leaks even when content doesn&apos;t.
             </span>,
           ]}
         />
@@ -158,7 +163,7 @@ export function MotivationSection() {
 
         <Reveal delay={0.16} className="mt-10">
           <p className="font-mono text-[0.7rem] uppercase tracking-[0.22em] text-[color:var(--text-muted)]">
-            The four tactics it watches
+            The four attacks it defeats structurally
           </p>
           <div className="mt-4 flex flex-wrap gap-2.5">
             {TACTICS.map((t, i) => (

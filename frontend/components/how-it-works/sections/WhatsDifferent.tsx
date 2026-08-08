@@ -1,11 +1,11 @@
 "use client";
 
 /**
- * §3.5 - "What's actually new". A thesis line, a 2×3 forensic feature grid
- * (six cards · mono title + one-line body), then the model-family-diversity
- * panel (§6 matrix) on a dark stage. The four adversarial-boundary seats run
- * four different families - that is the differentiator, so the family column is
- * highlighted. Token-only colours; band-blue stays sacred (never used here).
+ * §5 - "What's actually new". A thesis line, a 2×3 forensic feature grid
+ * (six cards · mono title + one-line body), then the deploy-topology panel
+ * (component/binary/deploys-where matrix) on a dark stage. Entry relay alone
+ * holds the admission gate - that is called out with a badge. Token-only
+ * colours; band-blue stays sacred (never used here).
  */
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -54,49 +54,45 @@ type Feature = { id: string; title: string; body: string };
 const FEATURES: Feature[] = [
   {
     id: "01",
-    title: "The code decides, not a model.",
-    body: "The rule engine is the only authority for PASS or FLAG.",
+    title: "No delivery receipts, by design.",
+    body: "There's no ACKNOWLEDGED state - a receipt traveling back would be exactly the correlation the design exists to prevent.",
   },
   {
     id: "02",
-    title: "The rulebook co-evolves.",
-    body: "A confirmed miss becomes a regression-tested rule in one step.",
+    title: "K-of-N directory, no single key.",
+    body: "An attestation from a key that isn't one of the configured N is rejected outright, not merely ignored.",
   },
   {
     id: "03",
-    title: "The wall is structural.",
-    body:
-      "Two separate Band identities; the crossing strips reasoning and model identity. Isolation by construction, not policy.",
+    title: "Proof-of-work bootstrap.",
+    body: "Sybil resistance without identity - 26 leading zero bits gates every token batch by default.",
   },
   {
     id: "04",
-    title: "The audit binds real messages.",
-    body: "The hash chain ties each step to a real Band message id.",
+    title: "Delay is sampled, not scheduled.",
+    body: "The sender draws each hop's delay from an exponential distribution; the relay enforces it by sleeping.",
   },
   {
     id: "05",
-    title: "Different model families guard each other.",
-    body:
-      "The four seats on an adversarial boundary run four different model families, so a blind spot in one can't quietly pass to the next.",
+    title: "Wire dressed as TLS records.",
+    body: "A naive-DPI bound (M8), not obfs4-grade - the honest scope of what that defends against.",
   },
   {
     id: "06",
-    title: "Both gates are deterministic.",
-    body:
-      "A new evasion must beat the real engine and profit in a backtest. Neither test is an LLM.",
+    title: "Loopback-only by design.",
+    body: "warren serve refuses any bind address but 127.0.0.1 - it holds an unlocked wallet and ratchet, with no auth.",
   },
 ];
 
-/* ── §6 model-family matrix (current backend, 2026-06-17) ─────────────────── */
+/* ── deploy-topology matrix (current backend) ──────────────────────────────── */
 type Seat = { seat: string; model: string; family: string; boundary: boolean; frontier?: boolean };
 const SEATS: Seat[] = [
-  { seat: "Adversary (R&D)", model: "claude-opus-4-8", family: "Anthropic", boundary: true, frontier: true },
-  { seat: "Prosecution", model: "Kimi-K2.7", family: "Moonshot", boundary: true },
-  { seat: "Defense", model: "DeepSeek-V4-Pro", family: "DeepSeek", boundary: true },
-  { seat: "Adjudicator", model: "GLM-5.2", family: "Zhipu", boundary: true },
-  { seat: "Escalation Manager", model: "Qwen3.5-397B", family: "Qwen", boundary: false },
-  { seat: "Anomaly · Investigator · Specialist", model: "Qwen3-Next-80B", family: "Qwen", boundary: false },
-  { seat: "Rule engine", model: "- deterministic", family: "-", boundary: false },
+  { seat: "Sender", model: "warren send / warren serve", family: "local machine", boundary: false },
+  { seat: "Entry relay", model: "warren relay --admit-key", family: "public (Railway)", boundary: true, frontier: true },
+  { seat: "Middle relay", model: "warren relay", family: "public (Railway)", boundary: true },
+  { seat: "Exit relay", model: "warren relay", family: "public (Railway)", boundary: true },
+  { seat: "Issuer", model: "credential.rs", family: "co-located with entry", boundary: false },
+  { seat: "Directory signers", model: "directory-fetch --dir-key", family: "independent operators", boundary: false },
 ];
 
 /* ── a single forensic feature card (staggered entrance + hover lift) ──────── */
@@ -186,9 +182,10 @@ export function WhatsDifferent() {
         />
         <Reveal delay={0.1}>
           <p className="mt-6 max-w-2xl text-lg leading-relaxed text-[color:var(--text-body)]">
-            Plenty of systems put a model in the loop. The point here is the
-            opposite: every load-bearing decision is structural or deterministic,
-            and the models only ever shape contested inputs.
+            Plenty of systems promise privacy as a policy - a promise not to log,
+            a promise not to share. The point here is the opposite: every
+            property that matters is structural or cryptographic, enforced by
+            the protocol itself, not by anyone&apos;s good behavior.
           </p>
         </Reveal>
 
@@ -210,18 +207,19 @@ export function WhatsDifferent() {
 
               <div className="relative">
                 <p className="font-mono text-xs uppercase tracking-[0.2em] text-[color:var(--text-muted)]">
-                  Model-family diversity
+                  Deploy topology
                 </p>
                 <h3 className="mt-3 font-display text-2xl leading-tight text-[color:var(--text-primary)] sm:text-3xl">
-                  Four seats, four families, one adversarial boundary.
+                  One binary, six roles, three trust zones.
                 </h3>
                 <p className="mt-4 max-w-3xl text-[15px] leading-relaxed text-[color:var(--text-body)]">
-                  The four seats that sit on an adversarial boundary - adversary,
-                  prosecution, defense, adjudicator - run four different model
-                  families. A manipulation the Anthropic adversary hides should be
-                  caught by a Moonshot prosecutor, weighed against a DeepSeek
-                  defender, and adjudicated by a Zhipu model - none of which share
-                  the adversary&apos;s blind spots.
+                  The entry, middle, and exit relays hold no secrets and are safe
+                  to expose publicly - that&apos;s the whole point of a mixnet.
+                  warren serve is the opposite: it holds an unlocked wallet and
+                  ratchet with no auth, so it runs only on each user&apos;s own
+                  machine, loopback-only. The admission gate is consumed once, at
+                  entry - gating a downstream relay would drop every legitimate
+                  packet.
                 </p>
 
                 {/* matrix */}
@@ -230,13 +228,13 @@ export function WhatsDifferent() {
                     <thead>
                       <tr className="border-b border-[color:var(--border-default)]">
                         <th className="py-3 pr-4 font-mono text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-muted)]">
-                          Seat
+                          Component
                         </th>
                         <th className="py-3 pr-4 font-mono text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-muted)]">
-                          Model
+                          Binary / role
                         </th>
                         <th className="py-3 pr-4 font-mono text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-primary)]">
-                          Family
+                          Deploys where
                         </th>
                       </tr>
                     </thead>
@@ -272,7 +270,7 @@ export function WhatsDifferent() {
                               {s.family}
                               {s.frontier && (
                                 <span className="ml-2 rounded border border-[color:var(--tier-frontier)] px-1.5 py-px text-[10px] uppercase tracking-[0.14em] text-[color:var(--tier-frontier)]">
-                                  frontier
+                                  admits
                                 </span>
                               )}
                             </span>
@@ -285,7 +283,7 @@ export function WhatsDifferent() {
 
                 <p className="mt-6 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.14em] text-[color:var(--text-faint)]">
                   <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--desk-surv)]" aria-hidden />
-                  adversarial-boundary seat
+                  publicly reachable
                 </p>
               </div>
             </div>

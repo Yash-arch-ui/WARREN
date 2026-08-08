@@ -11,8 +11,8 @@ const EASE = [0.16, 1, 0.3, 1] as [number, number, number, number];
  *  a whileInView trigger can miss it). Reduced motion → static. */
 function HeroHeading({ reduce }: { reduce: boolean }) {
   const lines = [
-    { t: "Watch the system", color: "var(--text-primary)" },
-    { t: "think - live.", color: "var(--text-faint)" },
+    { t: "Watch a message", color: "var(--text-primary)" },
+    { t: "cross the mix - live.", color: "var(--text-faint)" },
   ];
   if (reduce) {
     return (
@@ -51,9 +51,9 @@ function HeroHeading({ reduce }: { reduce: boolean }) {
 /**
  * DeskShowcaseHero - the opening pinned stage of the /desk showcase. Dark
  * Command-Center backbone with the ambient backdrop; a live pulse, a two-tone
- * heading (report §11 - "the live operations view that matters for a demo"), and
- * a faint always-running trace motif (agent dots + a Band token sweeping the
- * spine) to set the tone. CTAs jump to the embedded live desk or back to /how.
+ * heading, and a faint always-running trace motif (relay dots + a packet
+ * sweeping the spine) to set the tone. CTAs jump to the embedded live desk or
+ * back to /how-it-works.
  */
 function TraceMotif({ reduce }: { reduce: boolean }) {
   const DOTS = [8, 26, 44, 62, 80]; // % positions along the spine
@@ -129,12 +129,11 @@ export function DeskShowcaseHero() {
               style={{ fontSize: "clamp(24px,3.4vw,38px)", fontWeight: 600, letterSpacing: "-0.02em", lineHeight: 1.1 }}
             >
               <span style={{ color: "var(--text-primary)" }}>The real thing.</span>{" "}
-              <span style={{ color: "var(--text-faint)" }}>A novel evasion is already waiting on your Confirm.</span>
+              <span style={{ color: "var(--text-faint)" }}>Send a message and watch it chunk into Sphinx packets.</span>
             </h2>
             <p className="mx-auto mt-5 max-w-xl font-sans" style={{ fontSize: 14, lineHeight: 1.6, color: "var(--text-muted)" }}>
-              Beat B runs out of the box: the rules miss it, the case escalates. Confirm
-              it and watch the rulebook grow 4 ▸ 5 - then open the audit drawer and
-              verify the chain.
+              It crosses entry → middle → exit and lands - then open the packet
+              drawer and verify every hop against the signed directory.
             </p>
           </div>
         </Reveal>

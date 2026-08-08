@@ -5,11 +5,11 @@ import { motion, useTransform, type MotionValue } from "framer-motion";
 /**
  * Hud - the live metrics read-out pinned top-right of the stage. All values are
  * mono (Geist Mono) and animate continuously off the shared spring `t`, so the
- * numbers tick as the cluster forms, the ratio spikes, and the rule window
- * widens - a running telemetry strip rather than per-chapter swaps.
+ * numbers tick as the burst forms, the confidence spikes, and the guessed
+ * window widens - a running telemetry strip rather than per-chapter swaps.
  *
- * Rows: cancel_to_fill ratio · depth_levels · window_ms (contested→codified) ·
- * verdict · active rules (4 ▸ 5). Each row formats a derived MotionValue.
+ * Rows: confidence ratio · packets · window_ms (narrow→wide guess) ·
+ * match · hops peeled (2/3 ▸ 3/3). Each row formats a derived MotionValue.
  */
 
 function Row({
@@ -38,16 +38,16 @@ function Row({
 }
 
 export type HudProps = {
-  /** Pre-derived numeric / string MotionValues from EvasionStory. */
+  /** Pre-derived numeric / string MotionValues from CorrelationStory. */
   ratio: MotionValue<number>;
   depth: MotionValue<number>;
   windowMs: MotionValue<number>;
-  /** Tone of the cancel_to_fill value: gray→amber as it spikes. */
+  /** Tone of the confidence value: gray→amber as it spikes. */
   ratioTone: MotionValue<string>;
-  /** Verdict text + its tone, swapped by chapter window. */
+  /** Match text + its tone, swapped by chapter window. */
   verdict: MotionValue<string>;
   verdictTone: MotionValue<string>;
-  /** Active-rule count, rolls 4 → 5 in the final chapter. */
+  /** Hops-peeled count, rolls 2/3 → 3/3 in the final chapter. */
   rules: MotionValue<number>;
 };
 
@@ -63,7 +63,7 @@ export function Hud({
   const ratioText = useTransform(ratio, (v) => v.toFixed(2));
   const depthText = useTransform(depth, (v) => String(Math.round(v)));
   const windowText = useTransform(windowMs, (v) => `${Math.round(v)}ms`);
-  const rulesText = useTransform(rules, (v): string => (v < 4.5 ? "4" : "4 ▸ 5"));
+  const rulesText = useTransform(rules, (v): string => (v < 4.5 ? "2/3" : "3/3"));
 
   return (
     <div
@@ -79,7 +79,7 @@ export function Hud({
         style={{ borderColor: "var(--hairline)" }}
       >
         <span className="font-mono text-[9.5px] uppercase tracking-[0.2em] text-[var(--desk-surv)]">
-          live · market #0
+          live · flow #0
         </span>
         <span
           className="inline-block h-1.5 w-1.5 rounded-full"
@@ -87,19 +87,19 @@ export function Hud({
         />
       </div>
       <div className="space-y-2.5">
-        <Row label="cancel_to_fill" value={<motion.span>{ratioText}</motion.span>} tone={ratioTone} />
-        <Row label="depth_levels" value={<motion.span>{depthText}</motion.span>} />
+        <Row label="confidence" value={<motion.span>{ratioText}</motion.span>} tone={ratioTone} />
+        <Row label="packets" value={<motion.span>{depthText}</motion.span>} />
         <Row label="window_ms" value={<motion.span>{windowText}</motion.span>} />
-        <Row label="verdict" value={<motion.span>{verdict}</motion.span>} tone={verdictTone} />
-        <Row label="active_rules" value={<motion.span>{rulesText}</motion.span>} />
+        <Row label="match" value={<motion.span>{verdict}</motion.span>} tone={verdictTone} />
+        <Row label="hops_peeled" value={<motion.span>{rulesText}</motion.span>} />
       </div>
     </div>
   );
 }
 
 /**
- * HudStatic - the reduced-motion final-state read-out (codified window 450ms,
- * FLAG ✓, rules 5). No MotionValues.
+ * HudStatic - the reduced-motion final-state read-out (widest guessed window
+ * 450ms, 0.94 confidence, unconfirmed). No MotionValues.
  */
 export function HudStatic() {
   return (
@@ -116,7 +116,7 @@ export function HudStatic() {
         style={{ borderColor: "var(--hairline)" }}
       >
         <span className="font-mono text-[9.5px] uppercase tracking-[0.2em] text-[var(--desk-surv)]">
-          live · market #0
+          live · flow #0
         </span>
         <span
           className="inline-block h-1.5 w-1.5 rounded-full"
@@ -124,11 +124,11 @@ export function HudStatic() {
         />
       </div>
       <div className="space-y-2.5">
-        <Row label="cancel_to_fill" value="0.94" tone="var(--verdict-flag)" />
-        <Row label="depth_levels" value="5" />
+        <Row label="confidence" value="0.94" tone="var(--verdict-flag)" />
+        <Row label="packets" value="5" />
         <Row label="window_ms" value="450ms" />
-        <Row label="verdict" value="FLAG ✓" tone="var(--verdict-flag)" />
-        <Row label="active_rules" value="4 ▸ 5" />
+        <Row label="match" value="unconfirmed" tone="var(--verdict-flag)" />
+        <Row label="hops_peeled" value="3/3" />
       </div>
     </div>
   );

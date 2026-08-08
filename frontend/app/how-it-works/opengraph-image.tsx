@@ -2,7 +2,7 @@ import { ImageResponse } from "next/og";
 
 // /how-it-works Open Graph card - distinct title for the explainer.
 // Self-contained: the Logomark SVG is inlined (no client-component import).
-export const alt = "Alpha & Oversight - How it works: The Evasion";
+export const alt = "Warren - How it works: The Observer";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -60,7 +60,7 @@ export default function Image() {
                 letterSpacing: "0.01em",
               }}
             >
-              ALPHA &amp; OVERSIGHT
+              WARREN
             </span>
           </div>
           <div
@@ -91,7 +91,7 @@ export default function Image() {
             }}
           >
             <span>The</span>
-            <span style={{ color: FAINT, marginLeft: 24 }}>Evasion</span>
+            <span style={{ color: FAINT, marginLeft: 24 }}>Observer</span>
           </div>
           <div
             style={{
@@ -103,7 +103,7 @@ export default function Image() {
               maxWidth: 900,
             }}
           >
-            How a Band of agents catches what a single model misses.
+            Can&apos;t correlate what it can&apos;t see.
           </div>
         </div>
 
@@ -121,7 +121,7 @@ export default function Image() {
             fontFamily: "monospace",
           }}
         >
-          <span>Adversarial surveillance</span>
+          <span>Anonymous messaging</span>
           <span style={{ color: BAND }}>/how-it-works</span>
         </div>
       </div>

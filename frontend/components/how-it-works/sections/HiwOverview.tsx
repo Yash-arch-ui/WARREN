@@ -1,13 +1,13 @@
 "use client";
 
 /**
- * §3.2 "The whole picture" - the centerpiece overview. Mono eyebrow + two-tone
+ * §2 "The whole picture" - the centerpiece overview. Mono eyebrow + two-tone
  * .font-display headline, the paste-ready body, a full-width dark stage embedding
- * the native ArchitectureDiagram (D1), then a rebuilt two-desks split (editorial
- * cards, not a second diagram) with the Chinese-wall / SanitizedBridge note
- * between them. R&D = red team (1 agent, tone rnd); Surveillance = blue team
- * (7 agents, tone surv); the rule engine is plain code and the sole authority.
- * band-blue stays sacred (only the Band note carries it as the transport-of-record).
+ * the native ArchitectureDiagram (D1), then a sender/mix/recipient split
+ * (editorial cards, not a second diagram) with the structural-wall note
+ * between them. Sender side mints tokens (tone rnd); recipient side lists the
+ * relay hops (tone surv); the K-of-N directory is the sole authority on which
+ * relays are real. band-blue stays sacred (only the hop-crossing note carries it).
  */
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -18,15 +18,7 @@ import ArchitectureDiagram from "@/components/how-it-works/diagram/ArchitectureD
 
 const EASE = [0.16, 1, 0.3, 1] as [number, number, number, number];
 
-const SURV_AGENTS = [
-  "Anomaly Detector",
-  "Investigator",
-  "Specialist",
-  "Prosecution",
-  "Defense",
-  "Adjudicator",
-  "Escalation Manager",
-] as const;
+const HOPS = ["entry", "middle", "exit"] as const;
 
 const COUNT_MS = 1400;
 const EASE_OUT = (t: number) => 1 - Math.pow(1 - t, 3);
@@ -115,8 +107,8 @@ function LiftCard({
   );
 }
 
-/** One staggered surveillance-agent row. Reduced-motion → static row. */
-function AgentRow({ name, index }: { name: string; index: number }) {
+/** One staggered relay-hop row. Reduced-motion → static row. */
+function HopRow({ name, index }: { name: string; index: number }) {
   const reduce = useReducedMotion() ?? false;
   const inner = (
     <>
@@ -170,7 +162,7 @@ export function HiwOverview() {
               The whole picture
             </span>,
             <span key="b" className="text-[color:var(--text-faint)]">
-              - two desks, one wall.
+              - a sender, a mix, a recipient.
             </span>,
           ]}
         />
@@ -180,20 +172,20 @@ export function HiwOverview() {
           <p>
             <FillRun
               baseDelay={0}
-              text="The system is built from two desks that never share a model or a memory. They talk only through Band, a message bus that carries every handoff. The"
+              text="The system is built from three trust zones that never share a full view. The"
             />
-            <strong className="font-semibold text-[color:var(--text-primary)]">R&amp;D desk</strong>{" "}
-            <FillRun baseDelay={0.3} text="is the red team: one Adversary that invents new evasions. The" />
-            <strong className="font-semibold text-[color:var(--text-primary)]">Surveillance desk</strong>{" "}
+            <strong className="font-semibold text-[color:var(--text-primary)]">sender</strong>{" "}
+            <FillRun baseDelay={0.3} text="chunks the message into Sphinx packets and mints one admission token per packet. The" />
+            <strong className="font-semibold text-[color:var(--text-primary)]">mix</strong>{" "}
             <FillRun
               baseDelay={0.55}
-              text="is the blue team: seven agents that investigate a case, plus one rule engine that is not an agent at all. The rule engine is plain code, and it is the only thing that decides PASS or FLAG."
+              text="is three independent relays - entry, middle, exit - each peeling one Sphinx layer and forwarding blind. The relay list itself is only trusted once a K-of-N directory quorum has attested it."
             />
           </p>
           <p>
             <FillRun
               baseDelay={0}
-              text="Order flow crosses a one-way wall: only the bare orders move from R&D to Surveillance, with the adversary's reasoning and model identity stripped off first. Every message is sealed into a hash-chained ledger, so the whole decision can be replayed and checked."
+              text="A packet crosses a structural wall at every hop: each relay learns only the next address, never the full path. The recipient's ratchet decrypts and reassembles the chunks, and the sender never learns whether delivery succeeded - a receipt traveling back would be exactly the correlation the design exists to prevent."
             />
           </p>
         </Reveal>
@@ -217,25 +209,26 @@ export function HiwOverview() {
       {/* rebuilt two-desks split (editorial cards) */}
       <div className="mx-auto mt-14 max-w-[var(--maxw-content)] sm:mt-20">
         <div className="grid items-stretch gap-5 lg:grid-cols-[1fr_auto_1fr]">
-          {/* R&D - red team */}
+          {/* sender side - compose & mint */}
           <LiftCard delay={0}>
             <article className="h-full rounded-2xl border border-[color:var(--border-subtle)] bg-[var(--bg-card)] p-7">
               <header className="flex items-center justify-between border-b border-[color:var(--border-subtle)] pb-4">
                 <div>
                   <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[color:var(--desk-rnd)]">
-                    R&amp;D desk · red team
+                    Sender side · local
                   </p>
                   <h3 className="mt-1 font-display text-2xl text-[color:var(--text-primary)]">
-                    The adversary
+                    Compose &amp; mint
                   </h3>
                 </div>
                 <span className="shrink-0 rounded-full border border-[color:var(--desk-rnd)] px-3 py-1 font-mono text-[11px] text-[color:var(--desk-rnd)]">
-                  <CountUp to={1} suffix=" agent" />
+                  <CountUp to={1} suffix=" token / packet" />
                 </span>
               </header>
               <p className="mt-4 text-sm leading-relaxed text-[color:var(--text-body)]">
-                One Adversary invents new evasions, gated by two deterministic
-                oracles before any tactic is trusted.
+                The sender chunks the message into Sphinx packets and mints one
+                admission token per packet from a PoW-gated blind-signature
+                batch - the token proves nothing about who requested it.
               </p>
               <ul className="mt-5 space-y-2">
                 <li className="flex items-center gap-3 rounded-lg border border-[color:var(--border-subtle)] bg-[var(--bg-inset)] px-4 py-3">
@@ -245,60 +238,61 @@ export function HiwOverview() {
                     aria-hidden
                   />
                   <span className="font-mono text-[13px] text-[color:var(--text-primary)]">
-                    Adversary
+                    Issuer
                   </span>
                   <span className="ml-auto font-mono text-[11px] text-[color:var(--text-muted)]">
-                    invents evasions
+                    blind-signs the token batch
                   </span>
                 </li>
               </ul>
             </article>
           </LiftCard>
 
-          {/* the wall - Chinese wall / SanitizedBridge */}
+          {/* the wall - Sphinx layering across each hop */}
           <LiftCard delay={0.1} hover={false}>
             <div className="flex h-full min-w-[180px] flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-[color:var(--border-default)] bg-[var(--bg-inset)] px-6 py-7 text-center lg:max-w-[220px]">
               <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[color:var(--text-muted)]">
-                ⟂ Chinese wall
+                ⟂ structural wall
               </p>
               <div className="font-mono text-[13px] font-semibold text-[color:var(--text-primary)]">
-                SanitizedBridge
+                Sphinx layering
               </div>
               <p className="text-xs leading-relaxed text-[color:var(--text-body)]">
-                Only the bare order events cross R&amp;D → Surveillance. The
-                adversary&apos;s reasoning and model identity are stripped off first;
-                the rulebook flows back read-only.
+                Only the next hop&apos;s address crosses each boundary - no
+                relay ever learns the full path. Mix delay and cover traffic
+                scramble timing and volume before an observer can correlate
+                anything.
               </p>
               <p className="font-mono text-[11px] text-[color:var(--band-blue)]">
-                events only · on Band
+                one hop only · Sphinx-wrapped
               </p>
             </div>
           </LiftCard>
 
-          {/* Surveillance - blue team */}
+          {/* recipient side - the relay path */}
           <LiftCard delay={0.18}>
             <article className="h-full rounded-2xl border border-[color:var(--border-subtle)] bg-[var(--bg-card)] p-7">
               <header className="flex items-center justify-between border-b border-[color:var(--border-subtle)] pb-4">
                 <div>
                   <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[color:var(--desk-surv)]">
-                    Surveillance desk · blue team
+                    Recipient side · attested
                   </p>
                   <h3 className="mt-1 font-display text-2xl text-[color:var(--text-primary)]">
-                    The investigators
+                    The relay path
                   </h3>
                 </div>
                 <span className="shrink-0 rounded-full border border-[color:var(--desk-surv)] px-3 py-1 font-mono text-[11px] text-[color:var(--desk-surv)]">
-                  <CountUp to={7} suffix=" agents" />
+                  <CountUp to={3} suffix=" hops" />
                 </span>
               </header>
               <p className="mt-4 text-sm leading-relaxed text-[color:var(--text-body)]">
-                Seven agents investigate a case and shape the contested inputs -
-                plus one rule engine that is not an agent, the sole PASS / FLAG
-                authority.
+                Three relays carry the packet to delivery - plus a K-of-N
+                directory that is not a relay at all, the sole authority on
+                which relays are real.
               </p>
               <ul className="mt-5 grid gap-2 sm:grid-cols-2">
-                {SURV_AGENTS.map((name, i) => (
-                  <AgentRow key={name} name={name} index={i} />
+                {HOPS.map((name, i) => (
+                  <HopRow key={name} name={name} index={i} />
                 ))}
               </ul>
               <div className="mt-3 flex items-center gap-3 rounded-lg border border-[color:var(--tier-frontier)] bg-[var(--bg-inset)] px-4 py-3">
@@ -308,10 +302,10 @@ export function HiwOverview() {
                   aria-hidden
                 />
                 <span className="font-mono text-[13px] font-semibold text-[color:var(--text-primary)]">
-                  Rule engine
+                  Directory
                 </span>
                 <span className="ml-auto font-mono text-[11px] text-[color:var(--tier-frontier)]">
-                  not an agent · code decides
+                  K-of-N attested · no single key
                 </span>
               </div>
             </article>

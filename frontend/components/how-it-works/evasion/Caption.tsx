@@ -20,7 +20,7 @@ export type CaptionProps = {
   eyebrow: string;
   title: React.ReactNode;
   body: React.ReactNode;
-  /** Optional event chip (e.g. "ADVERSARY · 400ms layering-evasion"). */
+  /** Optional event chip (e.g. "SENDER · 400ms packet burst"). */
   chip?: { label: string; tone?: string };
 };
 
