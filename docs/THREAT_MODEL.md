@@ -1,6 +1,6 @@
 # UNLINK threat model
 
-*Status: M0–M3 written up. Still provisional against the full
+*Status: M0–M6 written up. Still provisional against the full
 `unlink-project-spec.md` (never attached); to be reconciled once it is
 shared.*
 
@@ -188,14 +188,30 @@ revisited deliberately, not by accident.
 
 2. **Sybil attacks on the directory.** An adversary who can flood the
    directory with colluding relays can increase `P(all hops adversarial)`.
-   Defending requires reputation, proof-of-work, or stake. **M2 status:**
-   reputation gating is now *mechanically* implemented (blind-signature
-   admission tokens) but the **bootstrap — who deserves a batch — is a
-   stubbed placeholder**: one batch per client-id, ever (spec §4 open
-   question, §PoW caveat; `credential::Issuer::grant_batch`, flagged
-   TODO-M-later). This placeholder is **known to be insufficient** for
-   real spam resistance; it exists so the token mechanics can be tested
-   end-to-end.
+   Defending requires reputation, proof-of-work, or stake. **M6 status:**
+   reputation gating is implemented (blind-signature admission tokens,
+   M2), and the **bootstrap — who deserves a batch** — is now gated by
+   **per-batch proof of work** (`src/pow.rs`;
+   `Issuer::pow_challenge`/`grant_batch`): the issuer hands out a
+   per-request challenge bound to `(fresh nonce, client_id, epoch)`, the
+   client mines it at a tunable difficulty (`--pow-bits`, default 26 ≈
+   67 M SHA-256 evals ≈ sub-second on commodity hardware), and one batch
+   is granted per (client, epoch) — fresh tokens each epoch for
+   established users, while every *new* identity (Sybil) pays the
+   proof-of-work cost. **The honest bound — verified in
+   `tests/m7_bootstrap.rs`, not assumed:** this is a **cost floor, not a
+   Sybil wall**. Minting M identities costs ≈ M × 2^bits hashes (linear,
+   no batch amplification — measured: 128 identities at bits=12 summed to
+   ≈ 524k hashes, vs. **zero** hashes for the same minting with the gate
+   off). But an attacker's *rate* scales with hashrate: a 20–100× GPU
+   advantage buys 20–100× the batches for the same wall-clock (the
+   well-known re-centralizing-around-compute caveat — see
+   `docs/SPAM_RESISTANCE.md` §3.1 for the quantified numbers). Client ids
+   are unauthenticated pseudonyms, so a third party can mine a batch under
+   another's client_id and consume that identity's one-per-epoch slot — a
+   griefing vector that costs the attacker one PoW, inherent to
+   pseudonymous handles (and not a linkability leak). Memory-hard PoW
+   (Argon2-style) or reputation/stake remain the hardening directions (§6).
 
 3. **Compromised directory.** If the directory itself is malicious (or its
    key stolen), it can steer every client through colluding relays and
@@ -214,11 +230,13 @@ revisited deliberately, not by accident.
    sizes only.
 
 7. **Sender authentication / spam prevention.** Messages are
-   pseudonymous. **M2 status:** unauthenticated senders are now dropped at
-   the entry relay (no/ invalid/spent/wrong-epoch token ⇒ `drop:`), so
-   *token-less* spam is blocked — but because bootstrap is a placeholder
-   (see §3.2), a granted batch can still be sybil-sprayed. Rate limiting
-   per relay and real bootstrap are M-later.
+   pseudonymous. **M6 status:** unauthenticated senders are dropped at the
+   entry relay (no / invalid / spent / wrong-epoch token ⇒ `drop:`), so
+   *token-less* spam is blocked; and batch bootstrap is now PoW-gated (see
+   §3.2), so sybil-spraying is **no longer free** — each identity must
+   mine ≈ 2^bits hashes per epoch. What remains: a funded attacker's
+   spray *rate* scales with hashrate (the §3.2 bound), and per-relay rate
+   limiting is still M-later.
 
 8. **Quantum adversaries.** No post-quantum crypto in scope. (Sphinx can
    be layered with PQ KEMs later; the abstraction allows it.)
@@ -300,8 +318,12 @@ We use `blind-rsa-signatures` (RFC 9474 / Privacy Pass v1) — see
   lists between clients, a DHT) — per spec §5.4's own "full DHT is a
   stretch goal", propagation is deliberately **M5+ future work**, flagged
   here rather than silently dropped.
-- Real bootstrap for token batches (spec §4; PoW/reputation) — replaces the
-  one-batch-per-client stub.
+- **Token-batch bootstrap is BUILT (M6, spec §4/§9)** — per-batch proof of
+  work (`src/pow.rs`), tunable via `--pow-bits`, one batch per
+  (client, epoch), with the honest linear-hashrate bound of §3.2 verified in
+  `tests/m7_bootstrap.rs`. Hardening directions that remain: memory-hard PoW
+  (Argon2-style, to close the GPU/hashrate gap), reputation/stake
+  bootstrap, and per-relay rate limiting (still M-later).
 - Persist/sync the relay double-spend set across restarts (M3); per-hop
   admission enforcement or ingress restriction (M3).
 - Network-split issuer (issue over the wire, issuer key outside the client's

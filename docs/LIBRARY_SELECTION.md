@@ -1,6 +1,8 @@
 # Library selection
 
-Four cryptographic dependencies, chosen with the same evidence standard:
+Four cryptographic dependencies (M6's proof-of-work adds **no new
+dependency** — it reuses `sha2`, already in the tree), chosen with the
+same evidence standard:
 
 1. **§1 — Sphinx mix packets (M0/M1):** [`sphinx-packet`](https://crates.io/crates/sphinx-packet)
    (Nymtech, Apache-2.0, v0.7.0). The project language is therefore **Rust**.
@@ -442,3 +444,60 @@ were already in the dependency tree:
 Nym's internal crates (not published for standalone use); introducing
 `tokio` just for timers (the synchronous design already sleeps per
 connection; a tokio event loop would be a rewrite, not a reuse).
+
+---
+
+# §7 Proof-of-work token-batch bootstrap (M6)
+
+**Design decision: no new library — SHA-256 via the existing `sha2`
+dependency (`src/pow.rs`).** The reputation-bootstrap question (spec §4/§9:
+who deserves a token batch, without an identity check that reintroduces
+linkability) is answered with the cheapest cost-bearing mechanism: the
+issuer grants a batch only to a client presenting a proof of work over a
+challenge bound to `(issuer nonce, client_id, epoch)`.
+
+## Why SHA-256 (no new dependency), not a memory-hard hash
+
+- **SHA-256 is already in the tree** — `sha2 0.11` is used by
+  `credential::Token::id` — so mining and verification add **zero new
+  crates** (the project rule: never add a dependency without a reason; and
+  never implement crypto ourselves — we implement *work*, not crypto). The
+  primitive itself is a preimage-resistant hash from the RustCrypto
+  audited family; we only chain inputs (`challenge ‖ counter`) and count
+  leading zero bits.
+- **Why not Argon2/other memory-hard KDFs (M6):** memory-hardness exists
+  to close the GPU/ASIC gap — but at this project's scale the *honest*
+  claim is the linear-hashrate bound anyway (`docs/THREAT_MODEL.md` §3.2:
+  this is a cost floor, not a Sybil wall). Introducing a memory-hard
+  primitive now would be a new dependency + parameter (memory, iterations)
+  whose benefit we cannot honestly claim to *measure* at MVP scale. It is
+  named as the first hardening direction, not silently dropped.
+- **Why not a VDF (verifiable delay function) or hash-chain:** VDFs need
+  trusted-setup-free yet expensive-to-verify constructions that are
+  exactly the don't-implement-crypto-ourselves territory; a simple
+  leading-zero-bits target is standard, tunable (`--pow-bits`), and
+  trivially verified.
+
+## Design details (what was verified in code, not assumed)
+
+- **Difficulty = required leading zero bits** of `SHA-256(challenge ‖
+  counter)`; expected work = 2^bits. `bits == 0` disables the gate
+  (everything verifies) — the same tunable pattern as `delay_ms`.
+- **Challenge binding** (`pow::challenge`): `SHA-256(nonce ‖ client_id ‖
+  epoch)` with a **fresh per-request nonce**, so a solution is not
+  reusable across clients, epochs, or issuer grants, and cannot be
+  precomputed before the challenge exists.
+- **Single-use challenges** (`Issuer::pending`): consumed by the first
+  `grant_batch` attempt — success *or* failure — so a stale solution can
+  never be replayed (pinned in `credential::tests` and
+  `tests/m7_bootstrap.rs`).
+- **One batch per (client, epoch)**, re-earnable each epoch: fresh tokens
+  for established users (no day-two lockout), while every new identity
+  pays the proof-of-work cost. The M2 "one batch ever" stub is replaced;
+  the blind-signature flow is untouched (PoW runs before it, invisible to
+  redemption).
+- **Verified, not assumed:** `pow::tests` (deterministic solution/verify),
+  `credential::tests` (gate enforcement, misbinding, single-use),
+  `tests/m7_bootstrap.rs` (measured linear scaling: 128 identities ≈
+  M × 2^bits hashes vs. 0 with the gate off; legit user 36 563 hashes /
+  0.26 s at bits=18).

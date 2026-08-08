@@ -45,6 +45,12 @@ fn token_issue_writes_wallet() {
         "3",
         "--epoch",
         "1",
+        // M6: the PoW gate is on by default (26 bits ≈ sub-second in release);
+        // a small difficulty keeps the smoke test instant while still
+        // exercising the real mine-then-grant path. The gate itself is
+        // thoroughly tested in `tests/m7_bootstrap.rs`.
+        "--pow-bits",
+        "10",
         "--home",
         &home.to_string_lossy(),
     ]);

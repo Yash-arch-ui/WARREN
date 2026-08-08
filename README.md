@@ -2,19 +2,23 @@
 
 A minimal CLI client for a mixnet-routed messenger.
 
-**Current milestone: M5.** Real 3-hop Sphinx routing over local TCP with
+**Current milestone: M6.** Real 3-hop Sphinx routing over local TCP with
 **enforced per-hop mix delay** (M1; since M5 **exponential/Poisson** — each
 hop's delay is sampled from Exp(mean `delay_ms`)), **constant-rate Poisson
 cover traffic** (M5: relays emit dummy Sphinx packets, routed like real
 packets, dropped at the exit — wire-indistinguishable and independent of
 the token gate), reputation-gated admission with blind-signature tokens
-(M2), a signed relay/gossip list verified by the client (M3), Layer-3
-message-body encryption with the Olm Double Ratchet (M3, via `vodozemac`),
-and the M4/M5 measurements + writeup (`docs/LATENCY.md`,
-`docs/ANONYMITY_ANALYSIS.md`, `docs/SPAM_RESISTANCE.md`,
-`docs/M4_SUMMARY.md`) are done. Still out of scope: real gossip
-*propagation* (M5+), a separate directory authority, full per-mix queue
-shaping / loop messages, transport obfuscation.
+(M2), **proof-of-work token-batch bootstrap** (M6: the issuer grants one
+batch per (client, epoch) only after a tunable PoW solve, `--pow-bits` —
+the spec §4/§9 answer to who deserves a batch), a signed relay/gossip list
+verified by the client (M3), Layer-3 message-body encryption with the Olm
+Double Ratchet (M3, via `vodozemac`), and the M4–M6 measurements +
+writeup (`docs/LATENCY.md`, `docs/ANONYMITY_ANALYSIS.md`,
+`docs/SPAM_RESISTANCE.md`, `docs/M4_SUMMARY.md`) are done. Still out of
+scope: real gossip *propagation* (M5+), a separate directory authority,
+full per-mix queue shaping / loop messages, transport obfuscation,
+memory-hard PoW / reputation bootstrap (the M6 PoW is an honest cost
+floor, not a Sybil wall — see `docs/SPAM_RESISTANCE.md` §3.1).
 
 ## Why Rust
 
@@ -37,6 +41,7 @@ $ unlink relay --start --port 7002 --key ~/.unlink/r2.key
 $ unlink relay --start --port 7003 --key ~/.unlink/r3.key
 
 # Terminal 4: get admission tokens and write the config
+# (M6: token-issue mines a proof of work; --pow-bits N tunes it, 0 disables)
 $ unlink token-issue --count 10
 
 # Terminal 5: bob sets up his Layer-3 ratchet identity (prints identity + one-time key)
@@ -81,7 +86,7 @@ rotates its keys.
 | Command                              | Status |
 |--------------------------------------|--------|
 | `unlink keygen`                      | x25519 identity keypair (0600 file) |
-| `unlink token-issue [--count N]`     | issue a blind-token batch (M2 dev tool) |
+| `unlink token-issue [--count N] [--pow-bits B] [--client-id ID]` | issue a blind-token batch, PoW-gated (M2+M6) |
 | `unlink directory-fetch <addr>...`   | assemble a verified signed relay list from live relays (M3) |
 | `unlink send <peer> <msg>`           | ratchet-encrypt the body, spend one token, build a 3-hop Sphinx packet, verify signed list + handshake claims, send via entry relay |
 | `unlink relay --start --port P`      | mix relay: unwrap-and-forward over TCP; `--admit-key`/`--epoch` enable the M2 gate; `--cover-rate N --network e,m,x` enable Poisson cover traffic (M5) |
@@ -102,8 +107,9 @@ src/
   ratchet.rs    # Layer-3 Olm Double Ratchet: account + per-peer sessions (M3)
   relay.rs      # unwrap-and-forward loop + admission gate + signed identity claim + cover emitter
   mix.rs        # M5 timing mixing: exponential per-hop delay + Poisson cover scheduling
+  pow.rs        # M6 proof-of-work: challenge binding, mining, verification (SHA-256)
   directory.rs  # signed relay claims + gossip list verify (M3)
-  credential.rs # blind-signature tokens: issuer / wallet / relay admission
+  credential.rs # blind-signature tokens: issuer / wallet / relay admission + PoW-gated bootstrap
   net.rs        # plain-TCP framing (transport obfuscation is M-later)
   config.rs     # client TOML config (relay path + peers, incl. Layer-3 keys)
 tests/
@@ -114,12 +120,13 @@ tests/
   m4_ratchet.rs       # full bidirectional Double Ratchet session over the real path
   m5_load.rs          # concurrent token abuse: relay stays responsive, drops correct
   m6_mixing.rs        # Poisson delay on the wire + cover traffic vs. the admission gate (M5)
+  m7_bootstrap.rs     # PoW bootstrap: enforcement, linear attacker scaling, legit-user usability (M6)
 docs/
-  LIBRARY_SELECTION.md    # sphinx-packet (§1) + blind-rsa-signatures (§2) + ed25519 (§4) + vodozemac (§5) + timing mixing (§6)
+  LIBRARY_SELECTION.md    # sphinx-packet (§1) + blind-rsa-signatures (§2) + ed25519 (§4) + vodozemac (§5) + timing mixing (§6) + PoW (§7)
   THREAT_MODEL.md         # adversary model, credential guarantees, MVP non-goals
   LATENCY.md              # latency data + per-hop-delay tradeoff (M4, M5 updates)
   ANONYMITY_ANALYSIS.md   # anonymity-set analysis at tested configs (M4, M5 updates)
-  SPAM_RESISTANCE.md      # token-gating spam-resistance argument (M4)
+  SPAM_RESISTANCE.md      # token-gating + PoW-bootstrap spam-resistance argument (M4, M6 updates)
   M4_SUMMARY.md           # milestone summary: built / follow-ups / out-of-scope
 .github/workflows/ci.yml # fmt + clippy + test
 ```
@@ -137,8 +144,10 @@ Read [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) first. Headline: Sphinx
 defends against passive observers and single malicious relays (verified in
 code, not assumed); blind tokens gate admission with unlinkable redemptions;
 the Olm Double Ratchet protects message content with forward secrecy and
-break-in recovery (M3); **global timing correlation is explicitly NOT
-solved** (spec §9) and remains out of MVP scope.
+break-in recovery (M3); PoW-gated batch bootstrap puts a computational
+cost floor on mass identity-minting (M6 — an honest cost floor, not a
+Sybil wall); **global timing correlation is explicitly NOT solved** (spec
+§9) and remains out of MVP scope.
 
 ## License
 

@@ -1,4 +1,4 @@
-# M4 milestone summary
+# Milestone summary (M0–M6)
 
 *Status: milestone checkpoint writeup. Everything stated here is anchored to
 what is actually implemented and tested in the repository — the writeups in
@@ -14,9 +14,10 @@ and `docs/THREAT_MODEL.md` are the precise references.*
 | **M3 — directory + Layer 3** | **Directory (beyond base MVP bar):** relays self-sign claims with long-term ed25519 keys; clients verify a signed gossip list and cross-check live handshake claims against it (§5.4, §8.5). **Message content:** Olm Double Ratchet encryption (forward secrecy + break-in recovery, verified against the crate source), full bidirectional session over the real path. | `tests/m3_directory.rs` (valid/unsigned/tampered/forged); `tests/m4_ratchet.rs` (bidirectional session, fresh key per message); `ratchet::tests` (N+1 key property, persistence) |
 | **M4 — measurements + writeup** | Latency measured at 3 config points (`delay_ms` 0/25/50); anonymity-set and spam-resistance analysis written without overclaiming; per-hop-delay tradeoff documented. | `tests/latency_measure.rs` (ignored harness); `docs/LATENCY.md`, `docs/ANONYMITY_ANALYSIS.md`, `docs/SPAM_RESISTANCE.md` |
 | **M5 — timing mixing** | **Exponential (Poisson) per-hop delay** (each hop's delay sampled from Exp(mean `delay_ms`); shape pinned deterministically) and **constant-rate Poisson cover traffic** (relays emit dummy Sphinx packets, routed like real packets, dropped at the exit; byte-size-indistinguishable). Both verified on the real path, including that cover bypasses the M2 admission gate without touching it. | `mix::tests` (deterministic distribution shape + constant-size Sphinx); `tests/m6_mixing.rs` (wire-varied delays; cover/admission interaction); `tests/m1_routing.rs` (Poisson-safe enforcement test); `tests/latency_measure.rs` (4 config points incl. cover); `docs/LATENCY.md`, `docs/ANONYMITY_ANALYSIS.md` (M5 updates) |
+| **M6 — bootstrap** | **Proof-of-work token-batch bootstrap** (spec §4/§9): the issuer's eligibility policy is no longer a stub — a per-request challenge bound to `(nonce, client_id, epoch)` must be mined (`--pow-bits`, default 26) before **one batch per (client, epoch)** is granted. Tunable; honest bound verified (linear M×2^bits cost vs. 0 with the gate off; legit user 36 563 hashes / 0.26 s at bits=18). | `pow::tests` (deterministic shape/binding); `credential::tests` (enforcement, misbinding, single-use challenges); `tests/m7_bootstrap.rs` (measured linear attacker scaling + legit-user usability); `tests/cli_smoke.rs` (mine-then-grant CLI path); `docs/THREAT_MODEL.md` §3.2/§3.7/§6, `docs/SPAM_RESISTANCE.md` §3.1, `docs/LIBRARY_SELECTION.md` §7 |
 
-**Test suite:** 59 tests passing; `cargo clippy --all-targets -- -D warnings`
-clean; `cargo fmt` clean (as of commit `8637699` + this M5 checkpoint).
+**Test suite:** 67 tests passing (+1 `#[ignore]`d latency harness);
+`cargo clippy --all-targets -- -D warnings` clean; `cargo fmt` clean.
 
 ## 2. Named follow-ups (per `docs/THREAT_MODEL.md` §3.1, §3.2, §6)
 
@@ -31,12 +32,14 @@ These are explicitly flagged future work, not silently absent:
   list mechanics are real; propagation (exchanging lists, a DHT) and an
   out-of-band directory/pubkey that vouches for relay identity keys are
   **M5+** (per spec §5.4's own "full DHT is a stretch goal").
-- **Real token-batch bootstrap** — the issuer's eligibility policy is a
-  stub (one batch per client-id); PoW/reputation/stake bootstrap is the
-  remaining spam-resistance gap (spec §4, §9). The spec's own bootstrap
-  open questions (including a possible zk-SNARK-style budget argument) are
-  unaddressed — the spec itself is not attached, so nothing further is
-  claimed here.
+- ~~**Token-batch bootstrap**~~ — **built in M6** as per-batch proof of
+  work (`src/pow.rs`), replacing the M2 one-batch-per-client stub; see the
+  M6 row and `docs/SPAM_RESISTANCE.md` §3.1 for the honest bound (a cost
+  floor, not a Sybil wall — supply scales with hashrate). What remains is
+  named, not silent: **memory-hard PoW** (Argon2-style) to close the
+  GPU/hashrate gap, and the spec's own open bootstrap questions (e.g. a
+  possible zk-SNARK-style budget argument) are still unaddressed — the
+  spec itself is not attached, so nothing further is claimed here.
 - **Transport obfuscation, timing mixing beyond the fixed delay, SURB-based
   anonymous replies, per-relay rate limiting, persisted double-spend set.**
 - **Global timing correlation is explicitly NOT solved** (spec §9) — the
@@ -56,7 +59,7 @@ These are explicitly flagged future work, not silently absent:
 ## 4. How to reproduce the claims
 
 ```console
-$ cargo test                                   # 51 tests (latency harness is #[ignore]d)
+$ cargo test                                   # 67 tests (latency harness is #[ignore]d)
 $ cargo clippy --all-targets -- -D warnings
 $ cargo test --release --test latency_measure -- --ignored --nocapture   # raw latency data
 ```

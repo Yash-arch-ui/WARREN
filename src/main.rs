@@ -25,12 +25,25 @@ enum Command {
         #[arg(long, help = "data dir (default $UNLINK_HOME or ~/.unlink)")]
         home: Option<PathBuf>,
     },
-    /// Issue a batch of blind-signature admission tokens (M2 dev tool)
+    /// Issue a batch of blind-signature admission tokens (M2 dev tool; M6:
+    /// requires a proof of work unless --pow-bits 0)
     TokenIssue {
         #[arg(long, default_value_t = credential::DEFAULT_BATCH_SIZE)]
         count: usize,
         #[arg(long, help = "epoch (default: current day)")]
         epoch: Option<u64>,
+        #[arg(
+            long,
+            default_value_t = unlink::pow::DEFAULT_POW_BITS,
+            help = "proof-of-work difficulty (leading zero bits; 0 disables the gate)"
+        )]
+        pow_bits: u32,
+        #[arg(
+            long,
+            default_value = "local-user",
+            help = "pseudonymous client id the batch is granted to"
+        )]
+        client_id: String,
         #[arg(long)]
         home: Option<PathBuf>,
     },
@@ -112,9 +125,21 @@ fn run(cmd: Command) -> anyhow::Result<String> {
     match cmd {
         Command::Keygen { home } => client::keygen(&home.unwrap_or_else(config::unlink_home)),
 
-        Command::TokenIssue { count, epoch, home } => {
+        Command::TokenIssue {
+            count,
+            epoch,
+            pow_bits,
+            client_id,
+            home,
+        } => {
             let home = home.unwrap_or_else(config::unlink_home);
-            token_issue(count, epoch.map(credential::Epoch), &home)
+            token_issue(
+                count,
+                epoch.map(credential::Epoch),
+                pow_bits,
+                &client_id,
+                &home,
+            )
         }
 
         Command::Send {
@@ -220,22 +245,31 @@ fn run(cmd: Command) -> anyhow::Result<String> {
     }
 }
 
-/// Local dev-tool issuance: plays both issuer and client roles. The bootstrap
-/// (who deserves a batch) is a stub — one batch per client-id, per spec §4
-/// open question (see `docs/THREAT_MODEL.md` §5).
+/// Local dev-tool issuance: plays both issuer and client roles. Bootstrap
+/// (M6): the client mines a proof of work over the issuer's per-request
+/// challenge (bound to client-id + epoch) before the batch is granted — the
+/// cost that makes mass identity-minting expensive (spec §4/§9; see
+/// `docs/THREAT_MODEL.md` §3.2 and `docs/SPAM_RESISTANCE.md` §3).
 fn token_issue(
     count: usize,
     epoch: Option<credential::Epoch>,
+    pow_bits: u32,
+    client_id: &str,
     home: &std::path::Path,
 ) -> anyhow::Result<String> {
     let epoch = epoch.unwrap_or_else(credential::Epoch::now);
     // Reuse the persisted issuer key so re-running `token-issue` does not
     // silently invalidate relays already configured with `--admit-key`.
     let mut issuer = credential::Issuer::load_or_new(Some(&home.join("issuer.pem")), epoch)?;
-    issuer.grant_batch("local-user")?; // M2 bootstrap stub
+    issuer.set_pow_bits(pow_bits)?;
+
+    let challenge = issuer.pow_challenge(client_id, epoch)?;
+    let counter = unlink::pow::mine(&challenge, pow_bits);
+    issuer.grant_batch(client_id, epoch, counter)?;
 
     let mut wallet = credential::ClientTokenWallet::new(epoch, issuer.public_key_pem()?);
     wallet.request_batch(&issuer, count)?;
+    let hashes = counter + 1;
 
     wallet.save(&home.join("wallet.json"))?;
     // Persist the issuer keypair so relays can be configured with --admit-key
@@ -250,7 +284,8 @@ fn token_issue(
     )?;
 
     Ok(format!(
-        "issued {count} admission tokens for epoch {} → {}",
+        "issued {count} admission tokens for epoch {} to `{client_id}` (proof of work: \
+         {pow_bits}-bit difficulty, {hashes} hashes) → {}",
         epoch.0,
         home.join("wallet.json").display()
     ))

@@ -106,26 +106,72 @@ impl Token {
 
 /// The blind-signature issuer. Holds the RSA keypair for one epoch.
 ///
-/// M2 bootstrap: eligibility to *receive* a batch is NOT implemented — spec
-/// §4 leaves it an open question (with the §PoW caveat). For now we gate it
-/// behind a trivial "one batch per client-id, ever" rule so the token
-/// mechanics can be tested end-to-end. TODO(M-later): real reputation/PoW-
-/// gated issuance and a per-epoch re-issuance policy.
+/// Bootstrap (M6): eligibility to *receive* a batch is gated by a
+/// **SHA-256 proof of work** ([`pow`]) — the spec §4/§9 answer to "how does a
+/// client earn a batch without an identity check that reintroduces
+/// linkability". The issuer hands out a per-request challenge bound to
+/// `(client_id, epoch)`; the client mines it; `grant_batch` verifies the
+/// difficulty (tunable, [`Issuer::set_pow_bits`]) and then grants **one batch
+/// per (client_id, epoch)** — fresh tokens each epoch for established users,
+/// while each *new* identity (Sybil) must pay the proof-of-work cost. The
+/// honest bound (not a Sybil wall — an attacker's supply scales with their
+/// hashrate) is in `docs/THREAT_MODEL.md` §3.2. The blind-signature
+/// mechanics are unchanged: this gate runs before them and is invisible to
+/// redemption.
 pub struct Issuer {
     keypair: KeyPair<Sha384, PSS, Randomized>,
     pub epoch: Epoch,
-    batches_granted: HashMap<String, usize>,
+    /// Proof-of-work difficulty (leading zero bits required on the challenge
+    /// hash). 0 disables the gate. See [`pow::DEFAULT_POW_BITS`].
+    pow_bits: u32,
+    /// Per-(client, epoch) batch accounting: one batch each. Grows by one
+    /// entry per (client, epoch) granted — acceptable for the dev-tool
+    /// issuer; a long-lived network issuer would epoch-scope this map the
+    /// way `RelayAdmission` scopes its double-spend set.
+    batches_granted: HashMap<(String, Epoch), usize>,
+    /// Issued-but-not-yet-granted challenges (per-request nonce, single
+    /// use): `client_id -> (challenge, epoch)`. At most **one per client** —
+    /// requesting another while one is pending is an explicit error, so a
+    /// stale challenge is never silently overwritten.
+    pending: HashMap<String, ([u8; 32], Epoch)>,
 }
 
 impl Issuer {
     pub fn new(epoch: Epoch) -> Result<Self> {
+        Self::with_pow_bits(epoch, crate::pow::DEFAULT_POW_BITS)
+    }
+
+    /// Like [`Issuer::new`], with an explicit proof-of-work difficulty.
+    pub fn with_pow_bits(epoch: Epoch, pow_bits: u32) -> Result<Self> {
         // 2048-bit RSA (matches RFC 9474 test vectors; 3072/4096 supported).
         let keypair = KeyPair::<Sha384, PSS, Randomized>::generate(&mut DefaultRng, 2048)?;
         Ok(Self {
             keypair,
             epoch,
+            pow_bits,
             batches_granted: HashMap::new(),
+            pending: HashMap::new(),
         })
+    }
+
+    /// Override the proof-of-work difficulty (tunable per deployment, same
+    /// pattern as `delay_ms` being config'd rather than fixed). `bits` is the
+    /// required leading-zero-bit count of the challenge hash; 0 disables the
+    /// gate.
+    pub fn set_pow_bits(&mut self, bits: u32) -> Result<()> {
+        if bits > 48 {
+            anyhow::bail!(
+                "pow_bits {bits} exceeds the practical cap of 48 (beyond ~2^40 the solve \
+                 is infeasible anyway; the cap also keeps `pow::mine`'s u64 counter from \
+                 ever overflowing)"
+            );
+        }
+        self.pow_bits = bits;
+        Ok(())
+    }
+
+    pub fn pow_bits(&self) -> u32 {
+        self.pow_bits
     }
 
     /// Load the issuer keypair from `key_path` if it exists (so a re-run of
@@ -146,7 +192,9 @@ impl Issuer {
         Ok(Self {
             keypair,
             epoch,
+            pow_bits: crate::pow::DEFAULT_POW_BITS,
             batches_granted: HashMap::new(),
+            pending: HashMap::new(),
         })
     }
 
@@ -164,15 +212,77 @@ impl Issuer {
         Ok(self.keypair.sk.blind_sign(blind)?)
     }
 
-    /// Bootstrap stub — see struct docs. Exactly one batch per client-id.
-    pub fn grant_batch(&mut self, client_id: &str) -> Result<()> {
-        if self.batches_granted.get(client_id).copied().unwrap_or(0) >= 1 {
+    /// Issue a per-request proof-of-work challenge for `client_id`. The
+    /// challenge binds the work to `(fresh nonce, client_id, epoch)` — a
+    /// solution is not reusable across clients, epochs, or grants. Fails fast
+    /// if the client already holds a batch this epoch (no wasted mining).
+    /// The returned challenge is **single-use**: consumed by the matching
+    /// [`Issuer::grant_batch`].
+    pub fn pow_challenge(&mut self, client_id: &str, epoch: Epoch) -> Result<[u8; 32]> {
+        if self
+            .batches_granted
+            .contains_key(&(client_id.to_string(), epoch))
+        {
+            anyhow::bail!(
+                "client `{client_id}` already has a batch for epoch {} — \
+                 one batch per (client, epoch)",
+                epoch.0
+            );
+        }
+        if self.pending.contains_key(client_id) {
+            anyhow::bail!(
+                "client `{client_id}` already has an issued-but-unused proof-of-work \
+                 challenge — present it (or let it expire) before requesting another; \
+                 challenges are single-use and never silently overwritten"
+            );
+        }
+        let nonce: [u8; TOKEN_NONCE_LEN] = rand::random();
+        let challenge = crate::pow::challenge(&nonce, client_id, epoch.0);
+        self.pending
+            .insert(client_id.to_string(), (challenge, epoch));
+        Ok(challenge)
+    }
+
+    /// Grant one batch to `client_id` for `epoch`, provided the client
+    /// presents a valid proof of work for the challenge previously issued via
+    /// [`Issuer::pow_challenge`] (at the issuer's configured difficulty).
+    /// This is the M6 replacement for the M2 "one batch ever" bootstrap stub:
+    /// the cost of a *new* identity is the proof of work, while established
+    /// users re-earn one batch each epoch for the same work. PoW is verified
+    /// *before* the (unchanged) blind-signature flow; redemption never sees
+    /// it.
+    pub fn grant_batch(&mut self, client_id: &str, epoch: Epoch, counter: u64) -> Result<()> {
+        let (challenge, challenge_epoch) = self.pending.remove(client_id).ok_or_else(|| {
+            anyhow!(
+                "no pending proof-of-work challenge for `{client_id}` — \
+                 call `unlink token-issue` / Issuer::pow_challenge first"
+            )
+        })?;
+        if challenge_epoch != epoch {
             return Err(anyhow!(
-                "client `{client_id}` has already been granted a batch (M2 bootstrap stub: \
-                 one batch per client-id — real eligibility is spec §4, TODO M-later)"
+                "proof-of-work challenge for `{client_id}` was issued for epoch {}, \
+                 not {}",
+                challenge_epoch.0,
+                epoch.0
             ));
         }
-        self.batches_granted.insert(client_id.to_string(), 1);
+        if !crate::pow::verify(&challenge, counter, self.pow_bits) {
+            return Err(anyhow!(
+                "proof of work for `{client_id}` does not meet difficulty {} \
+                 (expected ~2^{} hashes)",
+                self.pow_bits,
+                self.pow_bits
+            ));
+        }
+        let key = (client_id.to_string(), epoch);
+        if self.batches_granted.contains_key(&key) {
+            return Err(anyhow!(
+                "client `{client_id}` already has a batch for epoch {} — \
+                 one batch per (client, epoch)",
+                epoch.0
+            ));
+        }
+        self.batches_granted.insert(key, 1);
         Ok(())
     }
 }
@@ -437,12 +547,93 @@ mod tests {
         assert_eq!(relay.spent_count(), 0);
     }
 
+    /// Helper: complete the full PoW grant flow for `client_id` at the issuer's
+    /// difficulty, returning the counter found (hashes tried = counter + 1).
+    fn grant_with_pow(issuer: &mut Issuer, client_id: &str, epoch: Epoch) -> u64 {
+        let challenge = issuer.pow_challenge(client_id, epoch).unwrap();
+        let counter = crate::pow::mine(&challenge, issuer.pow_bits());
+        issuer.grant_batch(client_id, epoch, counter).unwrap();
+        counter
+    }
+
     #[test]
-    fn bootstrap_stub_grants_one_batch_per_client() {
-        let mut issuer = Issuer::new(Epoch(1)).unwrap();
-        issuer.grant_batch("alice").unwrap();
-        assert!(issuer.grant_batch("alice").is_err());
-        issuer.grant_batch("bob").unwrap();
+    fn pow_gate_grants_one_batch_per_client_per_epoch() {
+        // The M6 replacement for the M2 stub: each (client, epoch) is granted
+        // once, and only with a valid proof of work.
+        let mut issuer = Issuer::with_pow_bits(Epoch(1), 10).unwrap();
+
+        // A valid solution grants one batch for this client + epoch. (Real
+        // work is verified statistically in tests/m7_bootstrap.rs; a single
+        // solve can occasionally succeed on trial 0 with P ≈ 2^-10.)
+        grant_with_pow(&mut issuer, "alice", Epoch(1));
+
+        // Re-grant for the same (client, epoch) is refused even with a fresh,
+        // valid proof of work — one batch per (client, epoch).
+        let chal = issuer.pow_challenge("alice", Epoch(1)).unwrap_err();
+        assert!(chal.to_string().contains("already has a batch"));
+
+        // Another client can still get a batch.
+        grant_with_pow(&mut issuer, "bob", Epoch(1));
+
+        // A new epoch re-enables the established client (fresh tokens per
+        // epoch is the intended policy, not a lockout).
+        grant_with_pow(&mut issuer, "alice", Epoch(2));
+    }
+
+    #[test]
+    fn pow_gate_rejects_insufficient_or_misbound_work() {
+        let mut issuer = Issuer::with_pow_bits(Epoch(1), 10).unwrap();
+
+        // No challenge issued yet → grant refused (nothing to verify).
+        assert!(issuer.grant_batch("dave", Epoch(1), 0).is_err());
+
+        // A solution mined for the right client but a different epoch is
+        // refused.
+        let chal_e2 = issuer.pow_challenge("dave", Epoch(2)).unwrap();
+        let counter_e2 = crate::pow::mine(&chal_e2, 10);
+        assert!(issuer.grant_batch("dave", Epoch(1), counter_e2).is_err());
+        // ...and the pending challenge was *consumed* by the failed attempt,
+        // so the solution cannot be replayed later.
+        assert!(issuer.grant_batch("dave", Epoch(2), counter_e2).is_err());
+
+        // A solution mined for a different client's challenge is refused
+        // (the challenge binds client_id).
+        let chal_eve = issuer.pow_challenge("eve", Epoch(1)).unwrap();
+        let counter_eve = crate::pow::mine(&chal_eve, 10);
+        // frank has his own (distinct) pending challenge; eve's counter,
+        // mined over a different challenge, must not satisfy it.
+        let _ = issuer.pow_challenge("frank", Epoch(1)).unwrap();
+        assert!(issuer.grant_batch("frank", Epoch(1), counter_eve).is_err());
+
+        // A client with an issued-but-unused challenge cannot silently get a
+        // second one (no stale-challenge overwrite) — challenges are
+        // single-use by construction.
+        let chal_gwen = issuer.pow_challenge("gwen", Epoch(1)).unwrap();
+        let err = issuer
+            .pow_challenge("gwen", Epoch(1))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("issued-but-unused"), "got: {err}");
+        // The first challenge is still usable.
+        let counter_gwen = crate::pow::mine(&chal_gwen, 10);
+        issuer.grant_batch("gwen", Epoch(1), counter_gwen).unwrap();
+
+        // A counter below the found one is insufficient (mine iterates from
+        // 0, so every smaller counter fails by construction) — the difficulty
+        // is enforced, not just checked loosely. (`saturating_sub` keeps the
+        // comparison meaningful on the rare counter == 0 first-trial success.)
+        assert!(
+            issuer
+                .grant_batch("eve", Epoch(1), counter_eve.saturating_sub(1))
+                .is_err()
+        );
+        // The failed attempt *consumed* eve's single-use challenge, so the
+        // correct solution cannot be replayed against it…
+        assert!(issuer.grant_batch("eve", Epoch(1), counter_eve).is_err());
+        // …but a fresh challenge + fresh solve still succeeds.
+        let chal_eve2 = issuer.pow_challenge("eve", Epoch(1)).unwrap();
+        let counter_eve2 = crate::pow::mine(&chal_eve2, 10);
+        issuer.grant_batch("eve", Epoch(1), counter_eve2).unwrap();
     }
 
     /// The property that actually matters (the M2 integration test re-checks it

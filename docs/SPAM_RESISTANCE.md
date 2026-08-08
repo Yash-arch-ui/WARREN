@@ -1,7 +1,8 @@
 # Spam resistance argument (M4)
 
-*Status: M4 writeup, per spec §5.5. A written argument backed by the
-measured results of `tests/m5_load.rs` — **not** a formal proof.*
+*Status: M4 writeup (updated M6), per spec §5.5. A written argument backed
+by the measured results of `tests/m5_load.rs` and `tests/m7_bootstrap.rs` —
+**not** a formal proof.*
 
 ## 1. The mechanism: token-gated admission
 
@@ -21,9 +22,11 @@ A **wallet** can only spend each token once (`spend_token` pops), so a
 legitimate client is rate-limited to its granted batch per epoch. A
 **malicious** client can of course send as many frames as it wants — but
 each frame still needs a *valid, unspent* token to be admitted, and tokens
-are only issued by the issuer under the (currently stubbed) eligibility
-policy. This is the core spam-resistance argument: **admission cost is a
-cryptographic per-message cost, not a voluntary one.**
+are only issued by the issuer under its eligibility policy: a **per-batch
+proof of work** (M6, `--pow-bits`, default 26). This is the core
+spam-resistance argument: **admission cost is a cryptographic per-message
+cost, not a voluntary one, and batch acquisition has a per-identity
+computational cost, not an identity-check one.**
 
 ## 2. What the load test actually showed
 
@@ -69,16 +72,36 @@ What this establishes (carefully worded):
 The test is strong evidence the *gate mechanics* work under concurrent
 abuse. It is **not** an argument that the network is spam-proof:
 
-1. **The reputation-bootstrap problem is still open (spec §4/§9).** The
-   issuer's eligibility policy is a **stubbed placeholder**: one batch per
-   client-id, ever (`credential::Issuer::grant_batch`, flagged
-   TODO-M-later in `docs/THREAT_MODEL.md` §3.2). Anyone can obtain a batch
-   of tokens, so a **Sybil** can mint as many batches as it likes and then
-   spend them — the token mechanism gates *per-message cost* but does not
-   currently gate *who gets tokens*. Real bootstrap (proof-of-work,
-   reputation, or stake) is required before the admission gate becomes an
-   actual spam *barrier* rather than a cost-shaping mechanism. This is a
-   known, named gap — not solved here.
+1. **Reputation bootstrap is now PoW-gated (M6), with an honest bound.**
+   The issuer's eligibility policy is a **per-batch proof of work**
+   (`src/pow.rs`, `Issuer::pow_challenge`/`grant_batch`): a per-request
+   challenge bound to `(fresh nonce, client_id, epoch)` must be mined at a
+   tunable difficulty before one batch is granted per (client, epoch).
+   This is a real improvement over the M2 one-batch-per-client stub, and
+   the *measured* Sybil-resistance bound (`tests/m7_bootstrap.rs`) is:
+   - **Linear, unamplified cost:** minting M identities costs ≈ M × 2^bits
+     hashes. Measured: 128 identities at bits=12 summed to ≈ 524k hashes
+     (within the asserted [½, 2]× expected band); the *same* 128 mintings
+     with the gate off cost **0** hashes — the gate is precisely what
+     turns free minting into linear-cost minting.
+   - **A legitimate user is not locked out:** one user at bits=18 solved in
+     **36 563 hashes / 0.26 s** (measured, debug build on this machine;
+     release is far faster). The default of 26 ≈ 67 M evals ≈ sub-second
+     on commodity hardware — the "reasonable time/cost" the design target
+     set.
+   - **The honest limit (do not overclaim):** this is a **cost floor, not
+     a Sybil wall**. An attacker's supply scales *proportionally* with
+     hashrate: at the default difficulty (2²⁶ ≈ 67 M hashes per batch) a
+     rented GPU box (≈ 10 GH/s ≈ 10¹⁰ hashes/s, 20–100× a laptop) mints
+     ≈ 150 batches/s — **≈ 5×10⁵ batches/hour for cents**. PoW
+     re-centralizes around compute, the well-known caveat. It removes
+     *free* minting and forces per-identity cost; it does not stop a
+     funded adversary. Client ids are unauthenticated pseudonyms, so a
+     third party can also mine a batch under another's client_id and burn
+     that identity's one-per-epoch slot (griefing that costs the attacker
+     one PoW — inherent to pseudonymous handles). Memory-hard PoW
+     (Argon2-style), reputation, or stake are the remaining hardening
+     directions (`docs/THREAT_MODEL.md` §3.2, §6).
 2. **No rate limiting / DoS hardening.** A hostile client can still open
    many connections and consume relay CPU/memory even while every frame is
    dropped (the load test shows correct *rejection* under 200 frames, not
@@ -108,9 +131,12 @@ abuse. It is **not** an argument that the network is spam-proof:
 
 UNLINK's spam resistance today is: **every admitted message pays a
 cryptographic per-message cost that is unforgeable without the issuer's
-key, and the gate is verified to hold up under concurrent abuse.** What it
-is not yet: a barrier against **Sybil-obtained batches** (bootstrap is a
-stub), a defense against **resource-exhaustion floods** (no rate limiting),
-or a **formal** guarantee. All three are named follow-ups in
-`docs/THREAT_MODEL.md` (§3.2, §3.5/§3.7, §5), consistent with the standing
-instruction that MVP items are never quietly deferred.
+key, the gate is verified to hold up under concurrent abuse, and batch
+acquisition is PoW-gated so mass identity-minting is linearly expensive
+rather than free.** What it is not yet: a **wall** against a funded
+Sybil (the PoW bound is proportional to hashrate — a cost floor, not a
+solve; §3.1), a defense against **resource-exhaustion floods** (no rate
+limiting), or a **formal** guarantee. The remaining items are named
+follow-ups in `docs/THREAT_MODEL.md` (§3.2 hardening, §3.5/§3.7, §5),
+consistent with the standing instruction that MVP items are never quietly
+deferred.
