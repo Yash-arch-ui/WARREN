@@ -2,13 +2,15 @@
 
 A minimal CLI client for a mixnet-routed messenger.
 
-**Current milestone: M3.** Real 3-hop Sphinx routing over local TCP (M1),
-reputation-gated admission with blind-signature tokens (M2), a signed
-relay/gossip list with per-relay self-signed claims verified by the client
-(M3), and Layer-3 message-body encryption with the Olm Double Ratchet (M3,
-via `vodozemac`) are implemented and tested. Still out of scope: real
-gossip *propagation* (M5+), a separate directory authority, transport
-obfuscation, timing mixing.
+**Current milestone: M4.** Real 3-hop Sphinx routing over local TCP with
+**enforced, tunable per-hop mix delay** (M1), reputation-gated admission
+with blind-signature tokens (M2), a signed relay/gossip list verified by the
+client (M3), Layer-3 message-body encryption with the Olm Double Ratchet
+(M3, via `vodozemac`), and the M4 measurements + writeup
+(`docs/LATENCY.md`, `docs/ANONYMITY_ANALYSIS.md`, `docs/SPAM_RESISTANCE.md`,
+`docs/M4_SUMMARY.md`) are done. Still out of scope: real gossip
+*propagation* (M5+), a separate directory authority, cover traffic and
+Poisson timing mixing (M4+), transport obfuscation.
 
 ## Why Rust
 
@@ -106,9 +108,12 @@ tests/
   m4_ratchet.rs       # full bidirectional Double Ratchet session over the real path
   m5_load.rs          # concurrent token abuse: relay stays responsive, drops correct
 docs/
-  LIBRARY_SELECTION.md  # sphinx-packet (§1) + blind-rsa-signatures (§2) + ed25519 (§4) + vodozemac (§5)
-  THREAT_MODEL.md       # adversary model, credential guarantees, MVP non-goals
-  LATENCY.md            # raw end-to-end latency measurements (M3)
+  LIBRARY_SELECTION.md    # sphinx-packet (§1) + blind-rsa-signatures (§2) + ed25519 (§4) + vodozemac (§5)
+  THREAT_MODEL.md         # adversary model, credential guarantees, MVP non-goals
+  LATENCY.md              # latency data + per-hop-delay tradeoff (M4)
+  ANONYMITY_ANALYSIS.md   # anonymity-set analysis at tested configs (M4)
+  SPAM_RESISTANCE.md      # token-gating spam-resistance argument (M4)
+  M4_SUMMARY.md           # milestone summary: built / follow-ups / out-of-scope
 .github/workflows/ci.yml # fmt + clippy + test
 ```
 

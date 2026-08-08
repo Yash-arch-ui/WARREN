@@ -11,9 +11,10 @@
 //! from the sender's send returning (message fully pushed into the entry
 //! relay) until the receiver's decrypt loop observed the delivered plaintext.
 //!
-//! Per spec §5.5, latency is captured at **two configuration points** of the
-//! per-hop mix delay (spec §3.2, `[relays] delay_ms`): `0 ms` (no enforced
-//! per-hop delay) and `25 ms` (each forwarding relay sleeps 25 ms).
+//! Per spec §5.5, latency is captured at **three configuration points** of
+//! the per-hop mix delay (spec §3.2, `[relays] delay_ms`): `0 ms` (no
+//! enforced per-hop delay), `25 ms`, and `50 ms` (each forwarding relay
+//! sleeps that long).
 //!
 //! This test is `#[ignore]`d because it is environment-dependent and its
 //! numbers belong in `docs/LATENCY.md`, not in the CI suite. Run it with:
@@ -176,8 +177,9 @@ fn run_at_delay(tag: &str, delay_ms: u64) {
 #[test]
 #[ignore = "environment-dependent; transcribe into docs/LATENCY.md manually"]
 fn measure_end_to_end_latency_over_real_path() {
-    // Two configuration points of the per-hop mix delay (spec §5.5):
-    // 0 ms (no enforced per-hop delay) and 25 ms.
+    // Three configuration points of the per-hop mix delay (spec §5.5):
+    // 0 ms (no enforced per-hop delay), 25 ms, and 50 ms.
     run_at_delay("delay-0", 0);
     run_at_delay("delay-25", 25);
+    run_at_delay("delay-50", 50);
 }
