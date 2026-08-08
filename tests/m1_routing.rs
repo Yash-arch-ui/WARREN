@@ -12,11 +12,11 @@ mod common;
 use std::time::{Duration, Instant};
 
 use common::*;
-use unlink::client;
-use unlink::config::Config;
-use unlink::credential::{ClientTokenWallet, Epoch, Issuer};
-use unlink::directory::SignedRelayList;
-use unlink::ratchet::RatchetClient;
+use warren::client;
+use warren::config::Config;
+use warren::credential::{ClientTokenWallet, Epoch, Issuer};
+use warren::directory::SignedRelayList;
+use warren::ratchet::RatchetClient;
 
 #[test]
 fn three_hop_routing_delivers_and_no_relay_sees_sender_and_receiver() {
@@ -27,7 +27,7 @@ fn three_hop_routing_delivers_and_no_relay_sees_sender_and_receiver() {
     let middle = RelayProcess::spawn(&["--key", &tmp.path().join("key-middle").to_string_lossy()]);
     let exit = RelayProcess::spawn(&["--key", &tmp.path().join("key-exit").to_string_lossy()]);
 
-    // Bob's Layer-3 ratchet identity (the receiver half of `unlink listen`).
+    // Bob's Layer-3 ratchet identity (the receiver half of `warren listen`).
     let (bob_home, bob_id, bob_otk) = ratchet_init(&tmp, "bob");
     let receiver = Receiver::start(&bob_home);
 
@@ -40,10 +40,10 @@ fn three_hop_routing_delivers_and_no_relay_sees_sender_and_receiver() {
 
     // The CLI send path spends a token (M2 behavior); with no admission gate
     // configured the proof is ignored, so this still exercises the full real
-    // M1 transport through `unlink send`. Alice also needs a Layer-3 ratchet
+    // M1 transport through `warren send`. Alice also needs a Layer-3 ratchet
     // identity (the message body is Double-Ratchet encrypted — Layer 3).
     let home = tmp.path().join("alice");
-    unlink::ratchet::RatchetClient::init(&home).unwrap();
+    warren::ratchet::RatchetClient::init(&home).unwrap();
     let epoch = Epoch(1);
     let issuer = Issuer::new(epoch).unwrap();
     let mut wallet = ClientTokenWallet::new(epoch, issuer.public_key_pem().unwrap());

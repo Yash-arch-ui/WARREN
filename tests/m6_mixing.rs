@@ -22,11 +22,11 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use common::*;
-use unlink::client;
-use unlink::config::Config;
-use unlink::credential::{ClientTokenWallet, Epoch, Issuer};
-use unlink::directory::SignedRelayList;
-use unlink::ratchet::RatchetClient;
+use warren::client;
+use warren::config::Config;
+use warren::credential::{ClientTokenWallet, Epoch, Issuer};
+use warren::directory::SignedRelayList;
+use warren::ratchet::RatchetClient;
 
 /// Parse the per-hop delays a relay enforced while forwarding to `next_addr`
 /// (its log lines are `forward to <addr> delay=<N>ms`).
@@ -124,7 +124,7 @@ fn per_hop_delays_on_the_wire_are_exponentially_varied() {
     assert!(
         delays
             .iter()
-            .all(|&d| d <= unlink::relay::MAX_HONORED_DELAY_MS),
+            .all(|&d| d <= warren::relay::MAX_HONORED_DELAY_MS),
         "delay beyond the honored cap: {delays:?}"
     );
 

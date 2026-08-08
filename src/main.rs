@@ -3,16 +3,16 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 
 use clap::{Parser, Subcommand};
-use unlink::{client, config, credential, relay};
+use warren::{client, config, credential, relay};
 
-/// UNLINK — a minimal CLI client for a mixnet-routed messenger.
+/// WARREN — a minimal CLI client for a mixnet-routed messenger.
 ///
 /// M1: real 3-hop Sphinx routing over local TCP. M2: blind-signature
 /// admission tokens. M3: signed relay claims + verified gossip list (real
 /// gossip *propagation* is M5+, per spec §5.4) and Layer-3 Double Ratchet
 /// message-body encryption (Olm via `vodozemac`).
 #[derive(Parser)]
-#[command(name = "unlink", version, about, arg_required_else_help = true)]
+#[command(name = "warren", version, about, arg_required_else_help = true)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -22,7 +22,7 @@ struct Cli {
 enum Command {
     /// Generate an identity keypair (x25519) in the data dir
     Keygen {
-        #[arg(long, help = "data dir (default $UNLINK_HOME or ~/.unlink)")]
+        #[arg(long, help = "data dir (default $WARREN_HOME or ~/.warren)")]
         home: Option<PathBuf>,
     },
     /// Issue a batch of blind-signature admission tokens (M2 dev tool; M6:
@@ -34,7 +34,7 @@ enum Command {
         epoch: Option<u64>,
         #[arg(
             long,
-            default_value_t = unlink::pow::DEFAULT_POW_BITS,
+            default_value_t = warren::pow::DEFAULT_POW_BITS,
             help = "proof-of-work difficulty (leading zero bits; 0 disables the gate)"
         )]
         pow_bits: u32,
@@ -90,6 +90,25 @@ enum Command {
         #[arg(long)]
         home: Option<PathBuf>,
     },
+    /// Run a loopback HTTP API over this client (send/receive/status), so a
+    /// local process can use the mixnet as a message transport
+    Serve {
+        #[arg(long, default_value_t = 8800, help = "HTTP port on 127.0.0.1")]
+        port: u16,
+        #[arg(
+            long,
+            default_value = "127.0.0.1:9001",
+            help = "loopback address the exit relay delivers to"
+        )]
+        listen: String,
+        #[arg(long)]
+        home: Option<PathBuf>,
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Signed gossip list (default <home>/relays.json)
+        #[arg(long)]
+        relays: Option<PathBuf>,
+    },
     /// Run as a mix relay node
     Relay {
         #[arg(long)]
@@ -130,7 +149,7 @@ fn main() -> ExitCode {
 
 fn run(cmd: Command) -> anyhow::Result<String> {
     match cmd {
-        Command::Keygen { home } => client::keygen(&home.unwrap_or_else(config::unlink_home)),
+        Command::Keygen { home } => client::keygen(&home.unwrap_or_else(config::warren_home)),
 
         Command::TokenIssue {
             count,
@@ -139,8 +158,8 @@ fn run(cmd: Command) -> anyhow::Result<String> {
             client_id,
             home,
         } => {
-            let home = home.unwrap_or_else(config::unlink_home);
-            token_issue(
+            let home = home.unwrap_or_else(config::warren_home);
+            warren::api::token_issue(
                 count,
                 epoch.map(credential::Epoch),
                 pow_bits,
@@ -156,7 +175,7 @@ fn run(cmd: Command) -> anyhow::Result<String> {
             config,
             relays,
         } => {
-            let home = home.unwrap_or_else(config::unlink_home);
+            let home = home.unwrap_or_else(config::warren_home);
             let relays = relays.unwrap_or_else(|| client::relays_path(&home));
             client::send(
                 &peer,
@@ -173,10 +192,10 @@ fn run(cmd: Command) -> anyhow::Result<String> {
             home,
             dir_keys,
         } => {
-            let home = home.unwrap_or_else(config::unlink_home);
+            let home = home.unwrap_or_else(config::warren_home);
             let out = out.unwrap_or_else(|| client::relays_path(&home));
             let addrs: Vec<&str> = relays.iter().map(String::as_str).collect();
-            let mut list = unlink::directory::fetch_claims_from(&addrs)?;
+            let mut list = warren::directory::fetch_claims_from(&addrs)?;
             // M7: each --dir-key attests the assembled list with one of the N
             // directory keys. The client enforces the K-of-N threshold.
             for path in &dir_keys {
@@ -202,8 +221,8 @@ fn run(cmd: Command) -> anyhow::Result<String> {
         }
 
         Command::RatchetInit { home } => {
-            let home = home.unwrap_or_else(config::unlink_home);
-            let (id, otk) = unlink::ratchet::RatchetClient::init(&home)?;
+            let home = home.unwrap_or_else(config::warren_home);
+            let (id, otk) = warren::ratchet::RatchetClient::init(&home)?;
             Ok(format!(
                 "ratchet identity={id} one_time={otk}\nshare these with your peer and add them \
                  under [peers.<name>] in their config (id/otk)"
@@ -211,8 +230,26 @@ fn run(cmd: Command) -> anyhow::Result<String> {
         }
 
         Command::Listen { addr, home } => {
-            let home = home.unwrap_or_else(config::unlink_home);
+            let home = home.unwrap_or_else(config::warren_home);
             client::listen(&addr, &home)
+        }
+
+        Command::Serve {
+            port,
+            listen,
+            home,
+            config,
+            relays,
+        } => {
+            let home = home.unwrap_or_else(config::warren_home);
+            let relays = relays.unwrap_or_else(|| client::relays_path(&home));
+            warren::api::serve(
+                port,
+                &listen,
+                &home,
+                &config.unwrap_or_else(config::config_path),
+                &relays,
+            )
         }
 
         Command::Relay {
@@ -227,7 +264,7 @@ fn run(cmd: Command) -> anyhow::Result<String> {
         } => {
             if !start {
                 anyhow::bail!(
-                    "`unlink relay` requires `--start` (relay subcommands land with gossip propagation, M5+)"
+                    "`warren relay` requires `--start` (relay subcommands land with gossip propagation, M5+)"
                 )
             }
             let epoch = epoch.map(credential::Epoch);
@@ -271,50 +308,4 @@ fn run(cmd: Command) -> anyhow::Result<String> {
             Ok("relay stopped".into())
         }
     }
-}
-
-/// Local dev-tool issuance: plays both issuer and client roles. Bootstrap
-/// (M6): the client mines a proof of work over the issuer's per-request
-/// challenge (bound to client-id + epoch) before the batch is granted — the
-/// cost that makes mass identity-minting expensive (spec §4/§9; see
-/// `docs/THREAT_MODEL.md` §3.2 and `docs/SPAM_RESISTANCE.md` §3).
-fn token_issue(
-    count: usize,
-    epoch: Option<credential::Epoch>,
-    pow_bits: u32,
-    client_id: &str,
-    home: &std::path::Path,
-) -> anyhow::Result<String> {
-    let epoch = epoch.unwrap_or_else(credential::Epoch::now);
-    // Reuse the persisted issuer key so re-running `token-issue` does not
-    // silently invalidate relays already configured with `--admit-key`.
-    let mut issuer = credential::Issuer::load_or_new(Some(&home.join("issuer.pem")), epoch)?;
-    issuer.set_pow_bits(pow_bits)?;
-
-    let challenge = issuer.pow_challenge(client_id, epoch)?;
-    let counter = unlink::pow::mine(&challenge, pow_bits);
-    issuer.grant_batch(client_id, epoch, counter)?;
-
-    let mut wallet = credential::ClientTokenWallet::new(epoch, issuer.public_key_pem()?);
-    wallet.request_batch(&issuer, count)?;
-    let hashes = counter + 1;
-
-    wallet.save(&home.join("wallet.json"))?;
-    // Persist the issuer keypair so relays can be configured with --admit-key
-    // and so a later epoch can re-issue (M-later).
-    credential::write_private(
-        &home.join("issuer.pem"),
-        issuer.private_key_pem()?.as_bytes(),
-    )?;
-    credential::write_private(
-        &home.join("issuer.pub"),
-        issuer.public_key_pem()?.as_bytes(),
-    )?;
-
-    Ok(format!(
-        "issued {count} admission tokens for epoch {} to `{client_id}` (proof of work: \
-         {pow_bits}-bit difficulty, {hashes} hashes) → {}",
-        epoch.0,
-        home.join("wallet.json").display()
-    ))
 }

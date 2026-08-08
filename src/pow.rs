@@ -21,7 +21,7 @@ use sha2::{Digest, Sha256};
 /// challenge hash. Expected work = 2^26 ≈ 67 M SHA-256 evaluations ≈ a
 /// fraction of a second on commodity hardware — the "reasonable time" a
 /// legitimate user will tolerate once per epoch. Tunable via
-/// `unlink token-issue --pow-bits` (0 disables the gate entirely).
+/// `warren token-issue --pow-bits` (0 disables the gate entirely).
 pub const DEFAULT_POW_BITS: u32 = 26;
 
 /// A batch-grant challenge: binds the work to `(issuer nonce, client_id,

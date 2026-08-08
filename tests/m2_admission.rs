@@ -14,10 +14,10 @@ use std::path::Path;
 use std::time::Duration;
 
 use common::*;
-use unlink::client;
-use unlink::config::Config;
-use unlink::credential::{ClientTokenWallet, Epoch, Issuer, Token};
-use unlink::ratchet::RatchetClient;
+use warren::client;
+use warren::config::Config;
+use warren::credential::{ClientTokenWallet, Epoch, Issuer, Token};
+use warren::ratchet::RatchetClient;
 
 /// Create ONE issuer, write its public key PEM (relays load it via
 /// `--admit-key`) and return it so the *same* issuer signs the wallet's
@@ -130,7 +130,7 @@ fn replayed_token_is_dropped_by_relay() {
     // admission gate, where the replayed token must be dropped.
     let cfg = Config::load(&cfg_path).unwrap();
     let list =
-        unlink::directory::SignedRelayList::load_and_verify(&home.join("relays.json")).unwrap();
+        warren::directory::SignedRelayList::load_and_verify(&home.join("relays.json")).unwrap();
     let mut ratchet = RatchetClient::load(&home).unwrap();
     let bob = cfg.peers.get("bob").unwrap();
     let wire = ratchet.encrypt(&bob.id, &bob.otk, "replay").unwrap();
@@ -158,7 +158,7 @@ fn out_of_tokens_fails_cleanly_and_relay_survives() {
     let (receiver, cfg_path, _bob_id, _bob_otk) =
         bob_and_cfg(&tmp, (&entry.addr, &middle.addr, &exit.addr));
 
-    // Empty wallet (0 tokens): `unlink send` must fail cleanly. (The signed
+    // Empty wallet (0 tokens): `warren send` must fail cleanly. (The signed
     // list must be present and valid, or the send would fail earlier on
     // list verification instead of on the wallet.)
     let (home, wallet) = home_with_wallet(&tmp, &issuer, 0);
@@ -180,7 +180,7 @@ fn out_of_tokens_fails_cleanly_and_relay_survives() {
 
 #[test]
 fn no_correlatable_identifier_across_redemptions() {
-    let tmp = TempDir::new("m2-unlink");
+    let tmp = TempDir::new("m2-warren");
     let (issuer_pub, issuer) = setup_issuer(&tmp, 1);
     let (entry, middle, exit) = spawn_network(&tmp, &issuer_pub);
     let (receiver, cfg_path, _bob_id, _bob_otk) =

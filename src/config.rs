@@ -15,8 +15,8 @@
 //!
 //! [peers.bob]
 //! addr = "127.0.0.1:9001"   # delivery address of the final relay's client
-//! id   = "ab12…"            # bob's Layer-3 identity key (hex) — from `unlink ratchet-init`
-//! otk  = "cd34…"            # bob's Layer-3 one-time key (hex) — from `unlink ratchet-init`
+//! id   = "ab12…"            # bob's Layer-3 identity key (hex) — from `warren ratchet-init`
+//! otk  = "cd34…"            # bob's Layer-3 one-time key (hex) — from `warren ratchet-init`
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -143,21 +143,21 @@ impl Config {
     }
 }
 
-/// Data dir: `$UNLINK_HOME` if set, else `~/.unlink`.
-pub fn unlink_home() -> PathBuf {
-    if let Ok(home) = std::env::var("UNLINK_HOME") {
+/// Data dir: `$WARREN_HOME` if set, else `~/.warren`.
+pub fn warren_home() -> PathBuf {
+    if let Ok(home) = std::env::var("WARREN_HOME") {
         return PathBuf::from(home);
     }
     let home_dir = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    PathBuf::from(home_dir).join(".unlink")
+    PathBuf::from(home_dir).join(".warren")
 }
 
-/// Config path: `$UNLINK_CONFIG` if set, else `<home>/config.toml`.
+/// Config path: `$WARREN_CONFIG` if set, else `<home>/config.toml`.
 pub fn config_path() -> PathBuf {
-    if let Ok(cfg) = std::env::var("UNLINK_CONFIG") {
+    if let Ok(cfg) = std::env::var("WARREN_CONFIG") {
         return PathBuf::from(cfg);
     }
-    unlink_home().join("config.toml")
+    warren_home().join("config.toml")
 }
 
 #[cfg(test)]

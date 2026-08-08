@@ -42,12 +42,12 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use common::*;
-use unlink::client;
-use unlink::config::Config;
-use unlink::credential::{ClientTokenWallet, Epoch, Issuer};
-use unlink::directory::SignedRelayList;
-use unlink::net;
-use unlink::ratchet::RatchetClient;
+use warren::client;
+use warren::config::Config;
+use warren::credential::{ClientTokenWallet, Epoch, Issuer};
+use warren::directory::SignedRelayList;
+use warren::net;
+use warren::ratchet::RatchetClient;
 
 const SAMPLES: usize = 30;
 

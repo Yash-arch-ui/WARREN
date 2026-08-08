@@ -81,7 +81,7 @@ There is **no maintained pure-TS implementation** of the Sphinx packet format:
   implementation. That gives you the complexity of both worlds with none of
   the benefit of native Rust.
 
-Conclusion: a TS/Node UNLINK would either (a) reimplement Sphinx crypto from
+Conclusion: a TS/Node WARREN would either (a) reimplement Sphinx crypto from
 scratch — explicitly out of scope for this project — or (b) wrap WASM. Rust +
 `sphinx-packet` is strictly better.
 
@@ -374,7 +374,7 @@ The project rule (from §1/§2): never implement crypto ourselves.
   a normal message by trying each stored session on a **clone** and
   committing only on success (a wrong candidate never mutates state).
 - **Session setup is manual/config'd for M3** (the task's allowance):
-  `unlink ratchet-init` prints the client's identity key + a fresh one-time
+  `warren ratchet-init` prints the client's identity key + a fresh one-time
   key; the peer pastes those into its `[peers.<name>]` config entry. The
   library's own pre-key message flow then *is* the session establishment —
   no separate X3DH handshake needs to be implemented by us (the task

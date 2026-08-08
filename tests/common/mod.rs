@@ -1,5 +1,5 @@
 //! Shared helpers for the integration tests: spawn real relay processes,
-//! receive delivered messages, write configs, run the `unlink send` CLI.
+//! receive delivered messages, write configs, run the `warren send` CLI.
 //!
 //! Each integration-test binary only uses a subset of these helpers, so
 //! dead-code warnings across targets are expected.
@@ -21,7 +21,7 @@ pub struct TempDir(pub PathBuf);
 impl TempDir {
     pub fn new(tag: &str) -> Self {
         let n = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let p = std::env::temp_dir().join(format!("unlink-test-{tag}-{}-{n}", std::process::id()));
+        let p = std::env::temp_dir().join(format!("warren-test-{tag}-{}-{n}", std::process::id()));
         std::fs::create_dir_all(&p).unwrap();
         TempDir(p)
     }
@@ -45,13 +45,13 @@ pub struct RelayProcess {
     pub addr: String,
     pub pubkey_hex: String,
     /// The relay's self-signed claim, captured from its startup output.
-    pub claim: unlink::directory::RelayClaim,
+    pub claim: warren::directory::RelayClaim,
     logs: mpsc::Receiver<String>,
     history: Arc<Mutex<Vec<String>>>,
 }
 
 impl RelayProcess {
-    /// Spawn `unlink relay --start --port 0 <extra args>` and wait until it
+    /// Spawn `warren relay --start --port 0 <extra args>` and wait until it
     /// reports its actual address + public key.
     pub fn spawn(extra: &[&str]) -> Self {
         Self::spawn_with_port(0, extra)
@@ -62,7 +62,7 @@ impl RelayProcess {
     /// tests, where a relay's `--network` flag names the whole chain
     /// (including itself) up front.
     pub fn spawn_with_port(port: u16, extra: &[&str]) -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_unlink"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_warren"))
             .arg("relay")
             .arg("--start")
             .arg("--port")
@@ -102,7 +102,7 @@ impl RelayProcess {
                 }
                 Ok(line) if line.starts_with("relay claim: ") => {
                     let json = line.trim_start_matches("relay claim: ");
-                    claim = Some(unlink::directory::RelayClaim::from_json_str(json).unwrap());
+                    claim = Some(warren::directory::RelayClaim::from_json_str(json).unwrap());
                 }
                 Ok(_) => {}
                 Err(_) => {
@@ -160,7 +160,7 @@ impl Drop for RelayProcess {
 
 /// The "destination client": a TCP listener that collects delivered
 /// messages, **decrypting each with the Layer-3 Double Ratchet** (the
-/// receiver half of a real `unlink listen`). `home` must have been
+/// receiver half of a real `warren listen`). `home` must have been
 /// `ratchet-init`'d and hold the account whose one-time key the sender used.
 pub struct Receiver {
     pub addr: String,
@@ -175,11 +175,11 @@ impl Receiver {
         let rx = received.clone();
         let home = home.to_path_buf();
         std::thread::spawn(move || {
-            let mut ratchet = unlink::ratchet::RatchetClient::load(&home).unwrap();
+            let mut ratchet = warren::ratchet::RatchetClient::load(&home).unwrap();
             for stream in listener.incoming() {
                 let Ok(mut s) = stream else { continue };
-                if let Ok(Some((unlink::net::FRAME_DELIVER, body))) =
-                    unlink::net::recv_frame(&mut s)
+                if let Ok(Some((warren::net::FRAME_DELIVER, body))) =
+                    warren::net::recv_frame(&mut s)
                     && let Ok((_sender, pt)) = ratchet.decrypt(&body)
                 {
                     rx.lock()
@@ -262,15 +262,15 @@ pub fn write_config_with_delay(
 /// `(home, id_hex, otk_hex)` to hand to the sender's config.
 pub fn ratchet_init(tmp: &TempDir, tag: &str) -> (PathBuf, String, String) {
     let home = tmp.path().join(tag);
-    let (id, otk) = unlink::ratchet::RatchetClient::init(&home).unwrap();
+    let (id, otk) = warren::ratchet::RatchetClient::init(&home).unwrap();
     (home, id, otk)
 }
 
 /// Write a signed gossip list from relay claims (the client's trust anchor).
 pub fn write_relay_list(path: &Path, relays: &[&RelayProcess]) {
-    let claims: Vec<unlink::directory::RelayClaim> =
+    let claims: Vec<warren::directory::RelayClaim> =
         relays.iter().map(|r| r.claim.clone()).collect();
-    let list = unlink::directory::SignedRelayList::from_claims(claims);
+    let list = warren::directory::SignedRelayList::from_claims(claims);
     list.save(path).unwrap();
 }
 
@@ -281,9 +281,9 @@ pub fn write_attested_relay_list(
     relays: &[&RelayProcess],
     dir_sks: &[ed25519_dalek::SigningKey],
 ) {
-    let claims: Vec<unlink::directory::RelayClaim> =
+    let claims: Vec<warren::directory::RelayClaim> =
         relays.iter().map(|r| r.claim.clone()).collect();
-    let mut list = unlink::directory::SignedRelayList::from_claims(claims);
+    let mut list = warren::directory::SignedRelayList::from_claims(claims);
     for sk in dir_sks {
         list.attestations.push(list.sign_attestation(sk));
     }
@@ -313,9 +313,9 @@ pub fn write_config_with_directory(
     std::fs::write(path, s).unwrap();
 }
 
-/// Run `unlink send <peer> <msg> --home <home> --config <config>`.
+/// Run `warren send <peer> <msg> --home <home> --config <config>`.
 pub fn run_send(home: &Path, config: &Path, peer: &str, msg: &str) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_unlink"))
+    Command::new(env!("CARGO_BIN_EXE_warren"))
         .arg("send")
         .arg(peer)
         .arg(msg)
@@ -324,7 +324,7 @@ pub fn run_send(home: &Path, config: &Path, peer: &str, msg: &str) -> std::proce
         .arg("--config")
         .arg(config)
         .output()
-        .expect("failed to run unlink send")
+        .expect("failed to run warren send")
 }
 
 /// Sleep helper so log assertions run after the relay pipeline settles.

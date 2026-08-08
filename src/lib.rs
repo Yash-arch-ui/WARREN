@@ -1,4 +1,4 @@
-//! UNLINK — a minimal CLI client for a mixnet-routed messenger.
+//! WARREN — a minimal CLI client for a mixnet-routed messenger.
 //!
 //! Module map (see `docs/THREAT_MODEL.md` for the threat model these map to):
 //! - [`client`]     — identity keygen, path selection, packet build/send, listen
@@ -10,7 +10,9 @@
 //! - [`pow`]        — SHA-256 proof-of-work for token-batch bootstrap (M6)
 //! - [`net`]        — plain-TCP framing with TLS-record-layer wire dressing (M8)
 //! - [`config`]     — client TOML config (relay path, peers, M7 directory policy)
+//! - [`api`]        — `warren serve`: loopback HTTP surface over the above
 
+pub mod api;
 pub mod client;
 pub mod config;
 pub mod credential;

@@ -1,4 +1,4 @@
-//! Client module — the user-facing side of UNLINK.
+//! Client module — the user-facing side of WARREN.
 //!
 //! M1–M3 status:
 //! - `keygen` — real x25519 identity keypair, persisted 0600.
@@ -52,14 +52,14 @@ pub fn relays_path(home: &Path) -> PathBuf {
 
 /// Generate and persist an identity keypair (x25519). (Relays sign their
 /// claims with ed25519 identity keys since M3; the client's message-body
-/// identity lives in the Layer-3 ratchet account — see `unlink ratchet-init`.)
+/// identity lives in the Layer-3 ratchet account — see `warren ratchet-init`.)
 pub fn keygen(home: &Path) -> Result<String> {
     let sk = StaticSecret::random();
     let pk = PublicKey::from(&sk);
     let path = home.join("identity.key");
     crate::credential::write_private(&path, &sk.to_bytes())?;
     Ok(format!(
-        "unlink identity written to {} (pubkey {})",
+        "warren identity written to {} (pubkey {})",
         path.display(),
         hex::encode(pk.as_bytes())
     ))
@@ -133,7 +133,7 @@ fn load_wallet(home: &Path) -> Result<ClientTokenWallet> {
     let path = home.join("wallet.json");
     if !path.exists() {
         return Err(anyhow!(
-            "no token wallet at `{}` — run `unlink token-issue` first",
+            "no token wallet at `{}` — run `warren token-issue` first",
             path.display()
         ));
     }
@@ -268,7 +268,7 @@ fn resolve_verified_path(addrs: &[&str; 3], list: &SignedRelayList) -> Result<[P
         let expected = list.get(addr).ok_or_else(|| {
             anyhow!(
                 "relay {addr} is not in the verified relay list — re-run \
-                 `unlink directory-fetch` (or check the gossip list)"
+                 `warren directory-fetch` (or check the gossip list)"
             )
         })?;
         // The relay's live claim must be a valid self-signature AND match the
@@ -283,7 +283,7 @@ fn resolve_verified_path(addrs: &[&str; 3], list: &SignedRelayList) -> Result<[P
         if live.sphinx_pubkey != expected.sphinx_pubkey {
             anyhow::bail!(
                 "relay {addr} sphinx key mismatch between handshake and relay list — \
-                 stale list? re-run `unlink directory-fetch`"
+                 stale list? re-run `warren directory-fetch`"
             );
         }
         sphinx_keys.push(PublicKey::from(expected.sphinx_pubkey));
@@ -313,11 +313,11 @@ pub fn fetch_and_verify_claim(addr: &str) -> Result<RelayClaim> {
 
 /// Receive loop for a client: prints messages delivered by the exit relay,
 /// **decrypted** with the Layer-3 Double Ratchet. `home` holds the ratchet
-/// account + sessions (`unlink ratchet-init` must have been run).
+/// account + sessions (`warren ratchet-init` must have been run).
 pub fn listen(addr: &str, home: &Path) -> Result<String> {
     let mut ratchet = RatchetClient::load(home)?;
     let listener = std::net::TcpListener::bind(addr)?;
-    println!("unlink listening on {addr} — waiting for delivered messages (Ctrl-C to stop)");
+    println!("warren listening on {addr} — waiting for delivered messages (Ctrl-C to stop)");
     for stream in listener.incoming() {
         let mut stream = match stream {
             Ok(s) => s,

@@ -1,9 +1,9 @@
 # Rust build artifacts
 /target
 
-# Local state that unlink will create at runtime (identity keys, config)
+# Local state that warren will create at runtime (identity keys, config)
 # NOTE: identity material must NEVER be committed.
-.unlink/
+.warren/
 *.key
 *.pem
 

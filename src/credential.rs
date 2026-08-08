@@ -255,7 +255,7 @@ impl Issuer {
         let (challenge, challenge_epoch) = self.pending.remove(client_id).ok_or_else(|| {
             anyhow!(
                 "no pending proof-of-work challenge for `{client_id}` — \
-                 call `unlink token-issue` / Issuer::pow_challenge first"
+                 call `warren token-issue` / Issuer::pow_challenge first"
             )
         })?;
         if challenge_epoch != epoch {
@@ -365,7 +365,7 @@ impl ClientTokenWallet {
     pub fn spend_token(&mut self) -> Result<Token> {
         self.tokens.pop().ok_or_else(|| {
             anyhow!(
-                "out of tokens for epoch {} — run `unlink token-issue` or wait for the next epoch",
+                "out of tokens for epoch {} — run `warren token-issue` or wait for the next epoch",
                 self.epoch.0
             )
         })
@@ -690,7 +690,7 @@ mod tests {
     #[test]
     fn wallet_persistence_round_trip() {
         let (issuer, wallet) = make_issuer_and_wallet(7, 3);
-        let path = std::env::temp_dir().join(format!("unlink-wallet-test-{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!("warren-wallet-test-{}", std::process::id()));
         wallet.save(&path).unwrap();
         let loaded = ClientTokenWallet::load(&path).unwrap();
         let _ = std::fs::remove_file(&path);
@@ -705,7 +705,7 @@ mod tests {
         let epoch = Epoch(1);
         let issuer = Issuer::new(epoch).unwrap();
         let pem = issuer.private_key_pem().unwrap();
-        let path = std::env::temp_dir().join(format!("unlink-issuer-key-{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!("warren-issuer-key-{}", std::process::id()));
         std::fs::write(&path, &pem).unwrap();
         let reloaded = Issuer::load_or_new(Some(&path), epoch).unwrap();
         let _ = std::fs::remove_file(&path);

@@ -1,7 +1,7 @@
 //! M3 integration test: the signed gossip list (spec §5.4, §8.5).
 //!
 //! The client's trust anchor is a list of per-relay self-signed claims. This
-//! suite verifies over real relay processes + the real `unlink` CLI that:
+//! suite verifies over real relay processes + the real `warren` CLI that:
 //!
 //! 1. a **valid** signed list is accepted and used for routing (message
 //!    delivered through all three hops);
@@ -12,7 +12,7 @@
 //! 4. a **forged** list entry — an attacker-signed claim for an honest
 //!    relay's address — passes list self-signature checks but is rejected at
 //!    the live handshake cross-check (identity mismatch, §8.5);
-//! 5. the `unlink directory-fetch` CLI assembles a verified list from live
+//! 5. the `warren directory-fetch` CLI assembles a verified list from live
 //!    relays.
 
 mod common;
@@ -22,13 +22,13 @@ use std::process::Command;
 use std::time::Duration;
 
 use common::*;
-use unlink::credential::{ClientTokenWallet, Epoch, Issuer};
-use unlink::directory::{SignedRelayList, sign_claim};
+use warren::credential::{ClientTokenWallet, Epoch, Issuer};
+use warren::directory::{SignedRelayList, sign_claim};
 
 /// Write a wallet with `count` tokens into `home`, plus a Layer-3 ratchet
 /// identity for the sender (message bodies are Double-Ratchet encrypted).
 fn home_with_wallet(home: &Path, count: usize) {
-    unlink::ratchet::RatchetClient::init(home).unwrap();
+    warren::ratchet::RatchetClient::init(home).unwrap();
     let epoch = Epoch(1);
     let issuer = Issuer::new(epoch).unwrap();
     let mut wallet = ClientTokenWallet::new(epoch, issuer.public_key_pem().unwrap());
@@ -179,7 +179,7 @@ fn directory_fetch_cli_assembles_verified_list() {
     let exit = RelayProcess::spawn(&["--key", &tmp.path().join("key-exit").to_string_lossy()]);
 
     let out_path = tmp.path().join("relays.json");
-    let out = Command::new(env!("CARGO_BIN_EXE_unlink"))
+    let out = Command::new(env!("CARGO_BIN_EXE_warren"))
         .arg("directory-fetch")
         .arg(&entry.addr)
         .arg(&middle.addr)
@@ -187,7 +187,7 @@ fn directory_fetch_cli_assembles_verified_list() {
         .arg("--out")
         .arg(&out_path)
         .output()
-        .expect("failed to run unlink directory-fetch");
+        .expect("failed to run warren directory-fetch");
     assert!(
         out.status.success(),
         "directory-fetch failed: {}",

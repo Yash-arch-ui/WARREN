@@ -8,7 +8,7 @@
 //! - Each client owns a vodozemac [`Account`] (a curve25519 identity key plus
 //!   one-time keys) persisted in its data dir.
 //! - The **initial key exchange is manual/config'd for M3** (the task allows
-//!   it; spec §5's bar): `unlink ratchet-init` prints the account's identity
+//!   it; spec §5's bar): `warren ratchet-init` prints the account's identity
 //!   key + a fresh one-time key; the peer pastes those into its `[peers]`
 //!   config entry. No live X3DH-style handshake — the library's pre-key
 //!   message flow *is* the establishment step (the task permits this since
@@ -96,13 +96,13 @@ impl RatchetClient {
     }
 
     /// Load an existing client from its data dir. Fails with a clear error if
-    /// `unlink ratchet-init` was never run here.
+    /// `warren ratchet-init` was never run here.
     pub fn load(home: &Path) -> Result<Self> {
         let account_path = home.join(ACCOUNT_FILE);
         let sessions_path = home.join(SESSIONS_FILE);
         let account_raw = std::fs::read(&account_path).map_err(|e| {
             anyhow!(
-                "no Layer-3 ratchet state at `{}` — run `unlink ratchet-init` first ({e})",
+                "no Layer-3 ratchet state at `{}` — run `warren ratchet-init` first ({e})",
                 account_path.display()
             )
         })?;
@@ -233,7 +233,7 @@ impl RatchetClient {
                 }
                 Err(anyhow!(
                     "no session matched the incoming message (was the peer re-initialized? \
-                     re-run `unlink ratchet-init` on both sides)"
+                     re-run `warren ratchet-init` on both sides)"
                 ))
             }
         }
@@ -271,7 +271,7 @@ mod tests {
 
     fn temp_home(tag: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!(
-            "unlink-ratchet-{tag}-{}-{}",
+            "warren-ratchet-{tag}-{}-{}",
             std::process::id(),
             rand::random::<u64>()
         ));

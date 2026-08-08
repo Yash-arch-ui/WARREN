@@ -1,10 +1,10 @@
-# UNLINK threat model
+# WARREN threat model
 
 *Status: M0–M6 written up. Still provisional against the full
-`unlink-project-spec.md` (never attached); to be reconciled once it is
+`warren-project-spec.md` (never attached); to be reconciled once it is
 shared.*
 
-This document defines what UNLINK's mixnet architecture is *designed* to
+This document defines what WARREN's mixnet architecture is *designed* to
 defend against and — just as importantly — what it **explicitly does not**
 for the MVP. Every M1/M2/M3 engineering decision should be traceable back to
 an entry here.
@@ -144,19 +144,19 @@ attack, spec §8.5).
 `client::tests` (`handshake_claim_verified_and_parsed`,
 `handshake_unsigned_claim_rejected`), and `tests/m3_directory.rs`
 (valid list routes a message; unsigned / tampered / forged entries are
-rejected by the real `unlink send` CLI).
+rejected by the real `warren send` CLI).
 
 **First-use caveat (TOFU, accepted for MVP):** a self-signature proves the
 entry was produced by whoever holds that identity key — it does not by
 itself prove the key belongs to the *real* relay at that address. The
 client's protection is that it pins identity keys via the list (assembled
-once, e.g. via `unlink directory-fetch` against relays it already trusts)
+once, e.g. via `warren directory-fetch` against relays it already trusts)
 and thereafter rejects any relay whose live claim does not match.
 
 **M7 attestation layer:** the N directory keys additionally vouch for the
 *set* of identity keys — a relay list carries ≥K valid directory
 attestations before a client will use it (`--dir-key` on
-`unlink directory-fetch`; the client's `[directory] keys` + `threshold`).
+`warren directory-fetch`; the client's `[directory] keys` + `threshold`).
 An attacker would need ≥K directory keys (not one) to steer clients.
 Real gossip **propagation** (exchanging lists between clients / a DHT) is
 **explicitly out of scope for this project** — see §6.
@@ -318,7 +318,7 @@ We use `blind-rsa-signatures` (RFC 9474 / Privacy Pass v1) — see
 
 ## 5. Defense-in-depth notes
 
-- **Data minimization:** UNLINK must never log plaintext, peer addresses, or
+- **Data minimization:** WARREN must never log plaintext, peer addresses, or
   full paths; `relay` logs routing metadata only when required. Verified by
   the M1 integration test (no relay log contains the plaintext; only the
   exit relay logs the destination).

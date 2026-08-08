@@ -1,4 +1,4 @@
-# UNLINK
+# WARREN
 
 A minimal CLI client for a mixnet-routed messenger.
 
@@ -44,20 +44,20 @@ either. Decisions + alternatives in
 $ cargo build
 
 # Terminal 1–3: run the mix path
-$ unlink relay --start --port 7001 --key ~/.unlink/r1.key
-$ unlink relay --start --port 7002 --key ~/.unlink/r2.key
-$ unlink relay --start --port 7003 --key ~/.unlink/r3.key
+$ warren relay --start --port 7001 --key ~/.warren/r1.key
+$ warren relay --start --port 7002 --key ~/.warren/r2.key
+$ warren relay --start --port 7003 --key ~/.warren/r3.key
 
 # Terminal 4: get admission tokens and write the config
 # (M6: token-issue mines a proof of work; --pow-bits N tunes it, 0 disables)
-$ unlink token-issue --count 10
+$ warren token-issue --count 10
 
 # Terminal 5: bob sets up his Layer-3 ratchet identity (prints identity + one-time key)
-$ unlink ratchet-init --home ~/.unlink/bob
+$ warren ratchet-init --home ~/.warren/bob
 ratchet identity=<bob-id> one_time=<bob-otk>
 
 # Terminal 4: write the config with the relay path and bob's ratchet keys
-$ cat > ~/.unlink/config.toml <<'EOF'
+$ cat > ~/.warren/config.toml <<'EOF'
 [relays]
 entry     = "127.0.0.1:7001"
 middle    = "127.0.0.1:7002"
@@ -68,48 +68,83 @@ delay_ms  = 10   # MEAN per-hop mix delay (ms, spec §3.2): each hop's delay
 
 [peers.bob]
 addr = "127.0.0.1:9001"   # bob's delivery address
-id   = "<bob-id>"          # from bob's `unlink ratchet-init`
-otk  = "<bob-otk>"         # from bob's `unlink ratchet-init`
+id   = "<bob-id>"          # from bob's `warren ratchet-init`
+otk  = "<bob-otk>"         # from bob's `warren ratchet-init`
 EOF
 
 # Terminal 4: build the signed gossip list from the live relays (M3)
-$ unlink directory-fetch 127.0.0.1:7001 127.0.0.1:7002 127.0.0.1:7003
+$ warren directory-fetch 127.0.0.1:7001 127.0.0.1:7002 127.0.0.1:7003
 
 # Terminal 5: bob listens; Terminal 4: send through the mix
-$ unlink listen 127.0.0.1:9001 --home ~/.unlink/bob
-$ unlink send bob "hello through three relays"
+$ warren listen 127.0.0.1:9001 --home ~/.warren/bob
+$ warren send bob "hello through three relays"
 ```
 
 Admission gate (drop token-less/expired/replayed traffic at the entry relay):
-restart the entry relay with `--admit-key ~/.unlink/issuer.pub --epoch <n>`
+restart the entry relay with `--admit-key ~/.warren/issuer.pub --epoch <n>`
 where `<n>` matches the epoch used by `token-issue`.
 
 `send` refuses to transmit unless every relay on the path appears in
-`~/.unlink/relays.json` with a valid self-signature (spec §5.4/§8.5): run
-`unlink directory-fetch` once per relay set, and re-run it if a relay
+`~/.warren/relays.json` with a valid self-signature (spec §5.4/§8.5): run
+`warren directory-fetch` once per relay set, and re-run it if a relay
 rotates its keys.
 
 K-of-N directory (M7): with a `[directory]` section in `config.toml`
 (`keys = ["<hex ed25519 pubkey>", …]`, `threshold = 2`), `send` also
 refuses any list not attested by at least `threshold` of the `keys`. Attest
-a list at fetch time with `unlink directory-fetch … --dir-key
+a list at fetch time with `warren directory-fetch … --dir-key
 <32-byte-key-file>`, once per directory key.
 
 ## CLI
 
 | Command                              | Status |
 |--------------------------------------|--------|
-| `unlink keygen`                      | x25519 identity keypair (0600 file) |
-| `unlink token-issue [--count N] [--pow-bits B] [--client-id ID]` | issue a blind-token batch, PoW-gated (M2+M6) |
-| `unlink directory-fetch <addr>... [--dir-key <file>]...` | assemble a verified signed relay list from live relays; each `--dir-key` attests it with one of the N directory keys (M3 + M7) |
-| `unlink send <peer> <msg>`           | ratchet-encrypt the body, spend one token, build a 3-hop Sphinx packet, verify signed list + handshake claims, send via entry relay |
-| `unlink relay --start --port P`      | mix relay: unwrap-and-forward over TCP; `--admit-key`/`--epoch` enable the M2 gate; `--cover-rate N --network e,m,x` enable Poisson cover traffic (M5) |
-| `unlink ratchet-init [--home]`       | create Layer-3 Olm account; print identity + one-time key to share with a peer (M3) |
-| `unlink listen <addr:port> [--home]` | receive messages delivered by the exit relay, decrypting them with the Layer-3 ratchet |
+| `warren keygen`                      | x25519 identity keypair (0600 file) |
+| `warren token-issue [--count N] [--pow-bits B] [--client-id ID]` | issue a blind-token batch, PoW-gated (M2+M6) |
+| `warren directory-fetch <addr>... [--dir-key <file>]...` | assemble a verified signed relay list from live relays; each `--dir-key` attests it with one of the N directory keys (M3 + M7) |
+| `warren send <peer> <msg>`           | ratchet-encrypt the body, spend one token, build a 3-hop Sphinx packet, verify signed list + handshake claims, send via entry relay |
+| `warren relay --start --port P`      | mix relay: unwrap-and-forward over TCP; `--admit-key`/`--epoch` enable the M2 gate; `--cover-rate N --network e,m,x` enable Poisson cover traffic (M5) |
+| `warren ratchet-init [--home]`       | create Layer-3 Olm account; print identity + one-time key to share with a peer (M3) |
+| `warren listen <addr:port> [--home]` | receive messages delivered by the exit relay, decrypting them with the Layer-3 ratchet |
+| `warren serve [--port] [--listen]`   | loopback HTTP API over this client, so a local process can use the mixnet as a message transport (M9) |
 
-All file-touching commands take `--home <dir>` (default `$UNLINK_HOME` or
-`~/.unlink`); `send` also takes `--config <path>` and `--relays <path>`
+### `warren serve`
+
+A local process can drive the mixnet over HTTP instead of the CLI:
+
+```
+$ warren serve --port 8801 --listen 127.0.0.1:9001 --home ~/.warren/rnd
+```
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET`  | `/api/v1/agent/me` | this client's ratchet identity, delivery address, token count |
+| `GET`  | `/api/v1/agent/peers` | peers from `[peers]` in the config |
+| `GET`  | `/api/v1/status` | relay path, directory entries/attestations/threshold, tokens |
+| `POST` | `/api/v1/agent/chats/{room}/messages` | `{"content":…,"peer":…}` → `{"data":{"id":…}}` |
+| `GET`  | `/api/v1/agent/chats/{room}/messages/next` | next delivered message, or `204` when empty |
+| `POST` | `/api/v1/agent/chats/{room}/messages/{id}/processing`, `…/processed` | ack a delivered message |
+| `POST` | `/api/v1/ratchet/init`, `/api/v1/tokens/issue` | setup, mirroring the matching subcommands |
+
+Both the API port and `--listen` (where the exit relay delivers) are **loopback
+only** — this surface holds an unlocked wallet and ratchet account and has no
+authentication of its own.
+
+Two properties are worth knowing before building on it. A message larger than
+`MAX_MSG_LEN` (~705 B) is split across several Sphinx packets, and **each
+packet spends one admission token**. And because per-hop mix delays reorder
+packets by design, delivery order is restored best-effort: a message waits up
+to `REORDER_WINDOW` (1.5 s) for an earlier sibling before being released out of
+order rather than stalling behind it.
+
+All file-touching commands take `--home <dir>` (default `$WARREN_HOME` or
+`~/.warren`); `send` also takes `--config <path>` and `--relays <path>`
 (default `<home>/relays.json`).
+
+> **Renamed from `unlink`.** The binary, crate, data dir and environment
+> variables all changed: `~/.unlink` → `~/.warren`, `UNLINK_HOME` →
+> `WARREN_HOME`, `UNLINK_CONFIG` → `WARREN_CONFIG`. An existing data dir is
+> not migrated automatically — move it, or point `WARREN_HOME` at it.
 
 ## Project layout
 

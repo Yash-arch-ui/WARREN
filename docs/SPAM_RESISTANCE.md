@@ -129,7 +129,7 @@ abuse. It is **not** an argument that the network is spam-proof:
 
 ## 5. Bottom line
 
-UNLINK's spam resistance today is: **every admitted message pays a
+WARREN's spam resistance today is: **every admitted message pays a
 cryptographic per-message cost that is unforgeable without the issuer's
 key, the gate is verified to hold up under concurrent abuse, and batch
 acquisition is PoW-gated so mass identity-minting is linearly expensive

@@ -96,7 +96,7 @@ The receiver learns the sender's **Layer-3 ratchet identity** (that is how
 the Double Ratchet session works — `ratchet::decrypt` returns the sender's
 identity key). So the anonymity set of a message *as seen by its
 recipient* is exactly **{the sender}**: the recipient knows who messaged
-them. UNLINK is a pseudonymous messenger, not an anonymous-posting system;
+them. WARREN is a pseudonymous messenger, not an anonymous-posting system;
 that is by design (the peer you message is in your config, and the ratchet
 session pins your identity to them).
 

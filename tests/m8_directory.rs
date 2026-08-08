@@ -21,8 +21,8 @@ use std::time::Duration;
 
 use common::*;
 use ed25519_dalek::SigningKey;
-use unlink::credential::{ClientTokenWallet, Epoch, Issuer};
-use unlink::directory::SignedRelayList;
+use warren::credential::{ClientTokenWallet, Epoch, Issuer};
+use warren::directory::SignedRelayList;
 
 fn dir_key(i: u8) -> SigningKey {
     SigningKey::from_bytes(&[i; 32])
@@ -31,7 +31,7 @@ fn dir_key(i: u8) -> SigningKey {
 /// The default-sized set of N directory signers (the documented default is
 /// N = `directory::DEFAULT_DIR_SIGNERS` = 3).
 fn dir_set() -> Vec<SigningKey> {
-    (1..=unlink::directory::DEFAULT_DIR_SIGNERS as u8)
+    (1..=warren::directory::DEFAULT_DIR_SIGNERS as u8)
         .map(dir_key)
         .collect()
 }
@@ -44,7 +44,7 @@ fn dir_keys_hex(sks: &[SigningKey]) -> Vec<String> {
 
 /// Sender home with a Layer-3 ratchet identity + a wallet of `count` tokens.
 fn home_with_wallet(home: &Path, count: usize) {
-    unlink::ratchet::RatchetClient::init(home).unwrap();
+    warren::ratchet::RatchetClient::init(home).unwrap();
     let epoch = Epoch(1);
     let issuer = Issuer::new(epoch).unwrap();
     let mut wallet = ClientTokenWallet::new(epoch, issuer.public_key_pem().unwrap());
@@ -64,7 +64,7 @@ fn fabricated_list(dir_attest: &[&SigningKey]) -> SignedRelayList {
     .into_iter()
     .map(|(addr, seed)| {
         let relay_id = SigningKey::from_bytes(&[seed; 32]);
-        unlink::directory::sign_claim(addr, [7u8; 32], &relay_id)
+        warren::directory::sign_claim(addr, [7u8; 32], &relay_id)
     })
     .collect();
     let mut list = SignedRelayList::from_claims(claims);

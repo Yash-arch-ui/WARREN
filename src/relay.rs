@@ -94,12 +94,12 @@ pub struct CoverConfig {
 /// block once bound:
 ///
 /// ```text
-/// unlink relay listening on <addr> sphinx=<hex64> identity=<hex64>
+/// warren relay listening on <addr> sphinx=<hex64> identity=<hex64>
 /// relay claim: <json>
 /// ```
 ///
 /// The claim line is the relay's self-signed metadata; clients assemble it
-/// into a gossip list (see `unlink directory-fetch`).
+/// into a gossip list (see `warren directory-fetch`).
 pub fn start(
     port: u16,
     key_path: Option<&Path>,
@@ -113,7 +113,7 @@ pub fn start(
     // Self-sign the claim once, at startup, over the *actual* bound address.
     let claim = directory::sign_claim(&actual, *keys.sphinx_pk.as_bytes(), &keys.identity_sk);
     println!(
-        "unlink relay listening on {actual} sphinx={} identity={}",
+        "warren relay listening on {actual} sphinx={} identity={}",
         hex::encode(keys.sphinx_pk.as_bytes()),
         hex::encode(keys.identity_pk)
     );
@@ -453,7 +453,7 @@ fn parse_payload(payload: &[u8]) -> Vec<u8> {
 fn load_or_generate_keys(key_path: Option<&Path>) -> Result<RelayKeys> {
     let path = match key_path {
         Some(p) => p.to_path_buf(),
-        None => crate::config::unlink_home().join("relay.key"),
+        None => crate::config::warren_home().join("relay.key"),
     };
 
     let (sphinx_sk, identity_sk) = if path.exists() {
@@ -508,7 +508,7 @@ mod tests {
 
     #[test]
     fn keys_generate_reload_and_stay_stable() {
-        let path = std::env::temp_dir().join(format!("unlink-relay-key-{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!("warren-relay-key-{}", std::process::id()));
         let k1 = load_or_generate_keys(Some(&path)).unwrap();
         let k2 = load_or_generate_keys(Some(&path)).unwrap();
         let _ = std::fs::remove_file(&path);
@@ -524,7 +524,7 @@ mod tests {
         // Simulate an M1/M2 x25519-only key file: it must be upgraded to the
         // 64-byte format with a stable sphinx key and a fresh identity.
         let path =
-            std::env::temp_dir().join(format!("unlink-relay-key-old-{}", std::process::id()));
+            std::env::temp_dir().join(format!("warren-relay-key-old-{}", std::process::id()));
         let old_sk = StaticSecret::random();
         std::fs::write(&path, old_sk.to_bytes()).unwrap();
         let k = load_or_generate_keys(Some(&path)).unwrap();

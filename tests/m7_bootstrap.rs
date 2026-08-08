@@ -11,13 +11,13 @@
 
 use std::time::Instant;
 
-use unlink::credential::{AdmissionDecision, ClientTokenWallet, Epoch, Issuer, RelayAdmission};
+use warren::credential::{AdmissionDecision, ClientTokenWallet, Epoch, Issuer, RelayAdmission};
 
 /// Complete the full PoW grant flow for `client_id` at the issuer's
 /// difficulty.
 fn grant_with_pow(issuer: &mut Issuer, client_id: &str, epoch: Epoch) {
     let challenge = issuer.pow_challenge(client_id, epoch).unwrap();
-    let counter = unlink::pow::mine(&challenge, issuer.pow_bits());
+    let counter = warren::pow::mine(&challenge, issuer.pow_bits());
     issuer.grant_batch(client_id, epoch, counter).unwrap();
 }
 
@@ -46,7 +46,7 @@ fn gate_enforced_end_to_end() {
     // found solution (mine iterates from 0, so all smaller counters fail by
     // construction) — the difficulty is enforced, not checked loosely.
     let chal = issuer.pow_challenge("bob", epoch).unwrap();
-    let counter = unlink::pow::mine(&chal, bits);
+    let counter = warren::pow::mine(&chal, bits);
     let err = issuer
         .grant_batch("bob", epoch, counter.saturating_sub(1))
         .unwrap_err()
@@ -86,7 +86,7 @@ fn attacker_minting_cost_scales_linearly() {
     for i in 0..M {
         let id = format!("sybil-{i}");
         let chal = issuer.pow_challenge(&id, epoch).unwrap();
-        let counter = unlink::pow::mine(&chal, bits);
+        let counter = warren::pow::mine(&chal, bits);
         if counter == 0 {
             zero_work += 1;
         }
@@ -123,7 +123,7 @@ fn attacker_minting_cost_scales_linearly() {
         .map(|i| {
             let id = format!("open-{i}");
             let chal = open.pow_challenge(&id, epoch).unwrap();
-            let counter = unlink::pow::mine(&chal, 0);
+            let counter = warren::pow::mine(&chal, 0);
             open.grant_batch(&id, epoch, counter).unwrap();
             counter // always 0: the gate-off path performs no hashing
         })
@@ -146,7 +146,7 @@ fn legit_user_gets_usable_batch_in_reasonable_time() {
 
     let start = Instant::now();
     let chal = issuer.pow_challenge("carol", epoch).unwrap();
-    let counter = unlink::pow::mine(&chal, bits);
+    let counter = warren::pow::mine(&chal, bits);
     issuer.grant_batch("carol", epoch, counter).unwrap();
     let elapsed = start.elapsed();
 

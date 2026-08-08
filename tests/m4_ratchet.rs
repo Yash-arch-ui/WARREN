@@ -19,7 +19,7 @@
 //! over plain TCP, three real relays, an M2 token spend per message, and
 //! vodozemac Double Ratchet message-body encryption (`ratchet`).
 //!
-//! Why in-process rather than `unlink send` subprocesses: the CLI is a
+//! Why in-process rather than `warren send` subprocesses: the CLI is a
 //! one-shot per send, which would force a session to be re-established
 //! between CLI invocations; a real client is one process that both listens
 //! and sends on a single session. The send path here is byte-for-byte the
@@ -40,12 +40,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use common::*;
-use unlink::client;
-use unlink::config::Config;
-use unlink::credential::{ClientTokenWallet, Epoch, Issuer};
-use unlink::directory::SignedRelayList;
-use unlink::net;
-use unlink::ratchet::RatchetClient;
+use warren::client;
+use warren::config::Config;
+use warren::credential::{ClientTokenWallet, Epoch, Issuer};
+use warren::directory::SignedRelayList;
+use warren::net;
+use warren::ratchet::RatchetClient;
 
 /// A live client: one listening thread + one shared session state, able to
 /// both receive (decrypt FRAME_DELIVER bodies) and send (encrypt → spend a
