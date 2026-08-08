@@ -22,19 +22,24 @@ fn three_hop_routing_delivers_and_no_relay_sees_sender_and_receiver() {
     let entry = RelayProcess::spawn(&["--key", &tmp.path().join("key-entry").to_string_lossy()]);
     let middle = RelayProcess::spawn(&["--key", &tmp.path().join("key-middle").to_string_lossy()]);
     let exit = RelayProcess::spawn(&["--key", &tmp.path().join("key-exit").to_string_lossy()]);
-    let receiver = Receiver::start();
+
+    // Bob's Layer-3 ratchet identity (the receiver half of `unlink listen`).
+    let (bob_home, bob_id, bob_otk) = ratchet_init(&tmp, "bob");
+    let receiver = Receiver::start(&bob_home);
 
     let cfg_path = tmp.path().join("config.toml");
     write_config(
         &cfg_path,
         (&entry.addr, &middle.addr, &exit.addr),
-        &[("bob", &receiver.addr)],
+        &[("bob", &receiver.addr, &bob_id, &bob_otk)],
     );
 
     // The CLI send path spends a token (M2 behavior); with no admission gate
     // configured the proof is ignored, so this still exercises the full real
-    // M1 transport through `unlink send`.
-    let home = tmp.path().join("home");
+    // M1 transport through `unlink send`. Alice also needs a Layer-3 ratchet
+    // identity (the message body is Double-Ratchet encrypted — Layer 3).
+    let home = tmp.path().join("alice");
+    unlink::ratchet::RatchetClient::init(&home).unwrap();
     let epoch = Epoch(1);
     let issuer = Issuer::new(epoch).unwrap();
     let mut wallet = ClientTokenWallet::new(epoch, issuer.public_key_pem().unwrap());

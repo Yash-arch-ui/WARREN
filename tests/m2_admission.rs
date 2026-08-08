@@ -1,5 +1,6 @@
 //! M2 integration test: reputation-gated admission with blind-signature
-//! tokens, over the real 3-hop transport.
+//! tokens, over the real 3-hop transport (with Layer-3 Double Ratchet
+//! message-body encryption wired in — M3).
 //!
 //! 1. a valid token's message passes through and is delivered;
 //! 2. replaying the same token is dropped by the (entry) relay;
@@ -9,12 +10,14 @@
 
 mod common;
 
+use std::path::Path;
 use std::time::Duration;
 
 use common::*;
 use unlink::client;
 use unlink::config::Config;
 use unlink::credential::{ClientTokenWallet, Epoch, Issuer, Token};
+use unlink::ratchet::RatchetClient;
 
 /// Create ONE issuer, write its public key PEM (relays load it via
 /// `--admit-key`) and return it so the *same* issuer signs the wallet's
@@ -26,13 +29,15 @@ fn setup_issuer(tmp: &TempDir, epoch: u64) -> (std::path::PathBuf, Issuer) {
     (path, issuer)
 }
 
-/// Build a wallet of `count` tokens signed by `issuer` and persist it.
+/// Build a wallet of `count` tokens signed by `issuer` and persist it, plus a
+/// Layer-3 ratchet identity for the sender (message bodies are encrypted).
 fn home_with_wallet(
     tmp: &TempDir,
     issuer: &Issuer,
     count: usize,
 ) -> (std::path::PathBuf, ClientTokenWallet) {
-    let home = tmp.path().join("home");
+    let home = tmp.path().join("alice");
+    RatchetClient::init(&home).unwrap();
     let mut wallet = ClientTokenWallet::new(issuer.epoch, issuer.public_key_pem().unwrap());
     wallet.request_batch(issuer, count).unwrap();
     wallet.save(&home.join("wallet.json")).unwrap();
@@ -40,10 +45,7 @@ fn home_with_wallet(
 }
 
 /// Spawn entry (with admission gate) + middle + exit relays.
-fn spawn_network(
-    tmp: &TempDir,
-    issuer_pub: &std::path::Path,
-) -> (RelayProcess, RelayProcess, RelayProcess) {
+fn spawn_network(tmp: &TempDir, issuer_pub: &Path) -> (RelayProcess, RelayProcess, RelayProcess) {
     let entry = RelayProcess::spawn(&[
         "--key",
         &tmp.path().join("key-entry").to_string_lossy(),
@@ -57,10 +59,20 @@ fn spawn_network(
     (entry, middle, exit)
 }
 
-fn write_cfg(tmp: &TempDir, relays: (&str, &str, &str), receiver: &str) -> std::path::PathBuf {
+/// Bob's receiving client (ratchet-decrypting) + the config for the sender.
+fn bob_and_cfg(
+    tmp: &TempDir,
+    relays: (&str, &str, &str),
+) -> (Receiver, std::path::PathBuf, String, String) {
+    let (bob_home, bob_id, bob_otk) = ratchet_init(tmp, "bob");
+    let receiver = Receiver::start(&bob_home);
     let cfg_path = tmp.path().join("config.toml");
-    write_config(&cfg_path, relays, &[("bob", receiver)]);
-    cfg_path
+    write_config(
+        &cfg_path,
+        relays,
+        &[("bob", &receiver.addr, &bob_id, &bob_otk)],
+    );
+    (receiver, cfg_path, bob_id, bob_otk)
 }
 
 #[test]
@@ -68,12 +80,8 @@ fn valid_token_message_passes_through() {
     let tmp = TempDir::new("m2-valid");
     let (issuer_pub, issuer) = setup_issuer(&tmp, 1);
     let (entry, middle, exit) = spawn_network(&tmp, &issuer_pub);
-    let receiver = Receiver::start();
-    let cfg_path = write_cfg(
-        &tmp,
-        (&entry.addr, &middle.addr, &exit.addr),
-        &receiver.addr,
-    );
+    let (receiver, cfg_path, _bob_id, _bob_otk) =
+        bob_and_cfg(&tmp, (&entry.addr, &middle.addr, &exit.addr));
     let (home, _wallet) = home_with_wallet(&tmp, &issuer, 10);
     // The signed gossip list is the client's trust anchor (spec §5.4):
     // without a valid list the send is refused before the admission gate.
@@ -100,12 +108,8 @@ fn replayed_token_is_dropped_by_relay() {
     let tmp = TempDir::new("m2-replay");
     let (issuer_pub, issuer) = setup_issuer(&tmp, 1);
     let (entry, middle, exit) = spawn_network(&tmp, &issuer_pub);
-    let receiver = Receiver::start();
-    let cfg_path = write_cfg(
-        &tmp,
-        (&entry.addr, &middle.addr, &exit.addr),
-        &receiver.addr,
-    );
+    let (receiver, cfg_path, _bob_id, _bob_otk) =
+        bob_and_cfg(&tmp, (&entry.addr, &middle.addr, &exit.addr));
     let (home, wallet) = home_with_wallet(&tmp, &issuer, 2);
     write_relay_list(&home.join("relays.json"), &[&entry, &middle, &exit]);
 
@@ -122,11 +126,15 @@ fn replayed_token_is_dropped_by_relay() {
 
     // Craft a frame with the exact same token and push it at the entry relay.
     // The crafted send runs the full verification path (signed list + live
-    // handshake cross-check) before reaching the admission gate.
+    // handshake cross-check + Layer-3 encryption) before reaching the
+    // admission gate, where the replayed token must be dropped.
     let cfg = Config::load(&cfg_path).unwrap();
     let list =
         unlink::directory::SignedRelayList::load_and_verify(&home.join("relays.json")).unwrap();
-    client::send_packet(&cfg, &list, &receiver.addr, "replay", Some(&spent_token)).unwrap();
+    let mut ratchet = RatchetClient::load(&home).unwrap();
+    let bob = cfg.peers.get("bob").unwrap();
+    let wire = ratchet.encrypt(&bob.id, &bob.otk, "replay").unwrap();
+    client::send_packet(&cfg, &list, &receiver.addr, &wire, Some(&spent_token)).unwrap();
 
     // Block on the relay's drop decision first (deterministic), then assert
     // nothing was delivered.
@@ -147,12 +155,8 @@ fn out_of_tokens_fails_cleanly_and_relay_survives() {
     let tmp = TempDir::new("m2-empty");
     let (issuer_pub, issuer) = setup_issuer(&tmp, 1);
     let (mut entry, middle, exit) = spawn_network(&tmp, &issuer_pub);
-    let receiver = Receiver::start();
-    let cfg_path = write_cfg(
-        &tmp,
-        (&entry.addr, &middle.addr, &exit.addr),
-        &receiver.addr,
-    );
+    let (receiver, cfg_path, _bob_id, _bob_otk) =
+        bob_and_cfg(&tmp, (&entry.addr, &middle.addr, &exit.addr));
 
     // Empty wallet (0 tokens): `unlink send` must fail cleanly. (The signed
     // list must be present and valid, or the send would fail earlier on
@@ -179,12 +183,8 @@ fn no_correlatable_identifier_across_redemptions() {
     let tmp = TempDir::new("m2-unlink");
     let (issuer_pub, issuer) = setup_issuer(&tmp, 1);
     let (entry, middle, exit) = spawn_network(&tmp, &issuer_pub);
-    let receiver = Receiver::start();
-    let cfg_path = write_cfg(
-        &tmp,
-        (&entry.addr, &middle.addr, &exit.addr),
-        &receiver.addr,
-    );
+    let (receiver, cfg_path, _bob_id, _bob_otk) =
+        bob_and_cfg(&tmp, (&entry.addr, &middle.addr, &exit.addr));
     let (home, wallet) = home_with_wallet(&tmp, &issuer, 3);
     write_relay_list(&home.join("relays.json"), &[&entry, &middle, &exit]);
     let initial: Vec<Token> = wallet.unspent_tokens().to_vec();

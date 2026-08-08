@@ -1,7 +1,9 @@
-//! Client configuration: the relay path and peer→delivery address map. Path
-//! *selection* stays a small TOML file (real gossip propagation is M5+); the
-//! trust anchor for those addresses is the signed relay list
-//! (`directory::SignedRelayList`, verified in `client::send`).
+//! Client configuration: the relay path and peer→delivery address map, plus
+//! each peer's Layer-3 identity keys (the manual/config'd Double Ratchet key
+//! exchange — `docs/LIBRARY_SELECTION.md` §5). Path *selection* stays a small
+//! TOML file (real gossip propagation is M5+); the trust anchor for those
+//! addresses is the signed relay list (`directory::SignedRelayList`, verified
+//! in `client::send`).
 //!
 //! ```toml
 //! [relays]
@@ -9,8 +11,10 @@
 //! middle = "127.0.0.1:7002"
 //! exit   = "127.0.0.1:7003"
 //!
-//! [peers]
-//! bob = "127.0.0.1:9001"   # delivery address of the final relay's client
+//! [peers.bob]
+//! addr = "127.0.0.1:9001"   # delivery address of the final relay's client
+//! id   = "ab12…"            # bob's Layer-3 identity key (hex) — from `unlink ratchet-init`
+//! otk  = "cd34…"            # bob's Layer-3 one-time key (hex) — from `unlink ratchet-init`
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -22,7 +26,7 @@ use serde::Deserialize;
 pub struct Config {
     pub relays: Relays,
     #[serde(default)]
-    pub peers: std::collections::HashMap<String, String>,
+    pub peers: std::collections::HashMap<String, Peer>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -37,6 +41,18 @@ impl Relays {
     pub fn path(&self) -> [&str; 3] {
         [&self.entry, &self.middle, &self.exit]
     }
+}
+
+/// One message peer: delivery address + the Layer-3 key material needed to
+/// open a Double Ratchet session with them (the manual/config'd exchange).
+#[derive(Debug, Clone, Deserialize)]
+pub struct Peer {
+    /// Delivery address of the peer's listening client.
+    pub addr: String,
+    /// Peer's Layer-3 curve25519 identity key, hex-encoded (32 bytes).
+    pub id: String,
+    /// Peer's Layer-3 one-time key, hex-encoded (32 bytes).
+    pub otk: String,
 }
 
 impl Config {
@@ -78,17 +94,19 @@ entry = "127.0.0.1:7001"
 middle = "127.0.0.1:7002"
 exit = "127.0.0.1:7003"
 
-[peers]
-bob = "127.0.0.1:9001"
+[peers.bob]
+addr = "127.0.0.1:9001"
+id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+otk = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 "#;
         let cfg: Config = toml::from_str(raw).unwrap();
         assert_eq!(
             cfg.relays.path(),
             ["127.0.0.1:7001", "127.0.0.1:7002", "127.0.0.1:7003"]
         );
-        assert_eq!(
-            cfg.peers.get("bob").map(String::as_str),
-            Some("127.0.0.1:9001")
-        );
+        let bob = cfg.peers.get("bob").unwrap();
+        assert_eq!(bob.addr, "127.0.0.1:9001");
+        assert_eq!(bob.id.len(), 64);
+        assert_eq!(bob.otk.len(), 64);
     }
 }

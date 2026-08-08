@@ -4,13 +4,20 @@
 //! - `keygen` — real x25519 identity keypair, persisted 0600.
 //! - `send`   — real 3-hop path selection (config addresses), **signed gossip
 //!   list verification** (`directory::SignedRelayList`), signed-handshake
-//!   verification with cross-check against the list (spec §8.5), Sphinx
-//!   packet construction via `sphinx-packet`, M2 admission proof, plain-TCP
+//!   verification with cross-check against the list (spec §8.5), **Layer-3
+//!   Double Ratchet message-body encryption** (`ratchet`), Sphinx packet
+//!   construction via `sphinx-packet`, M2 admission proof, plain-TCP
 //!   transmission to the entry relay.
-//! - `listen` — receive loop for messages delivered by the exit relay.
+//! - `listen` — receive loop for messages delivered by the exit relay;
+//!   decrypts each message with the Layer-3 ratchet before printing.
 //!
-//! Double Ratchet content encryption is still out of scope (Sphinx wrapping
-//! is the message body for now).
+//! Trust order in `send`: message validation → config/peer lookup → signed
+//! relay list → path verification → **encryption** → token spend → transmit.
+//! Everything before the token spend is a *refusal* path that must not burn
+//! an admission token (spec §8.5), and encryption is one of those refusals.
+//! (The token is spent *before* the network transmit, so a transport failure
+//! during the final push can still cost a token — a pre-existing M1/M2
+//! trade-off, distinct from the refusal paths above.)
 
 use std::path::{Path, PathBuf};
 
@@ -26,20 +33,23 @@ use crate::config::Config;
 use crate::credential::{ClientTokenWallet, Token};
 use crate::directory::{RelayClaim, SignedRelayList};
 use crate::net;
+use crate::ratchet::{OLM_WIRE_OVERHEAD, RatchetClient};
 
 pub const PATH_LEN: usize = 3;
 /// Plaintext budget inside the fixed 1024-byte payload: overhead (16 zeros +
-/// 1 padding marker) minus our 2-byte length prefix.
-pub const MAX_MSG_LEN: usize = PAYLOAD_SIZE - PAYLOAD_OVERHEAD_SIZE - 2;
+/// 1 padding marker) minus our 2-byte length prefix, minus the Layer-3 olm
+/// wire overhead (encrypted body replaces plaintext in the payload — see
+/// `ratchet::OLM_WIRE_OVERHEAD` and the size test).
+pub const MAX_MSG_LEN: usize = PAYLOAD_SIZE - PAYLOAD_OVERHEAD_SIZE - 2 - OLM_WIRE_OVERHEAD;
 
 /// Default location of the signed gossip list for a data dir.
 pub fn relays_path(home: &Path) -> PathBuf {
     home.join("relays.json")
 }
 
-/// Generate and persist an identity keypair (x25519). (ed25519 identity keys
-/// exist on relays for claim signing since M3; client-side signing keys land
-/// with Double Ratchet, M-later.)
+/// Generate and persist an identity keypair (x25519). (Relays sign their
+/// claims with ed25519 identity keys since M3; the client's message-body
+/// identity lives in the Layer-3 ratchet account — see `unlink ratchet-init`.)
 pub fn keygen(home: &Path) -> Result<String> {
     let sk = StaticSecret::random();
     let pk = PublicKey::from(&sk);
@@ -74,9 +84,10 @@ pub fn send(
     }
 
     let cfg = Config::load(config_path)?;
-    let receiver = cfg.peers.get(peer).ok_or_else(|| {
+    let peer_label = peer.to_string();
+    let peer = cfg.peers.get(peer).ok_or_else(|| {
         anyhow!(
-            "unknown peer `{peer}` — add it under [peers] in {}",
+            "unknown peer `{peer_label}` — add it under [peers] in {}",
             config_path.display()
         )
     })?;
@@ -90,13 +101,20 @@ pub fn send(
     // burning an admission token (spec §8.5).
     let sphinx_keys = resolve_verified_path(&cfg.relays.path(), &list)?;
 
+    // Layer 3: encrypt the message body with the Double Ratchet. The peer's
+    // identity + one-time keys come from config (manual/config'd exchange, §5).
+    // Also a refusal path: a missing/unparseable ratchet state must not burn
+    // a token either.
+    let mut ratchet = RatchetClient::load(home)?;
+    let wire = ratchet.encrypt(&peer.id, &peer.otk, msg)?;
+
     let mut wallet = load_wallet(home)?;
     let token = wallet.spend_token()?; // clean "out of tokens" error
     wallet.save(&home.join("wallet.json"))?;
 
-    transmit_packet(&cfg, receiver, msg, Some(&token), &sphinx_keys)?;
+    transmit_packet(&cfg, &peer.addr, &wire, Some(&token), &sphinx_keys)?;
     Ok(format!(
-        "sent {} B to {peer} (token epoch {}) via {} → {} → {}",
+        "sent {} B to {peer_label} (token epoch {}) via {} → {} → {}",
         msg.len(),
         token.epoch.0,
         cfg.relays.entry,
@@ -116,9 +134,10 @@ fn load_wallet(home: &Path) -> Result<ClientTokenWallet> {
     ClientTokenWallet::load(&path)
 }
 
-/// Core send: build a 3-hop Sphinx packet for `receiver` and push it into the
-/// entry relay. `proof = Some(token)` attaches the M2 admission proof ahead
-/// of the mix layers; relays without admission config ignore it.
+/// Core send: build a 3-hop Sphinx packet carrying the **Layer-3 encrypted
+/// message body** and push it into the entry relay. `proof = Some(token)`
+/// attaches the M2 admission proof ahead of the mix layers; relays without
+/// admission config ignore it.
 ///
 /// Trust flow (spec §8.5): for each relay on the path the client (1) looks up
 /// the verified gossip-list entry for that address, (2) fetches the relay's
@@ -126,26 +145,30 @@ fn load_wallet(home: &Path) -> Result<ClientTokenWallet> {
 /// signature, and (4) cross-checks identity + sphinx keys against the list.
 /// Any mismatch — a substituted relay, a MITM injecting its own key, a stale
 /// list — aborts the send with a clean error.
+///
+/// `wire` is the Layer-3 ciphertext (`[u8 type][olm bytes]`); `send()`
+/// produces it via `RatchetClient::encrypt`. This function is also used
+/// directly by tests that craft frames (e.g. the M2 replay test).
 pub fn send_packet(
     cfg: &Config,
     list: &SignedRelayList,
     receiver: &str,
-    msg: &str,
+    wire: &[u8],
     proof: Option<&Token>,
 ) -> Result<()> {
-    if msg.len() > MAX_MSG_LEN {
-        anyhow::bail!(
-            "message too long: {} B (max {MAX_MSG_LEN} B inside the 1024-B Sphinx payload)",
-            msg.len()
-        );
+    if wire.is_empty() {
+        anyhow::bail!("refusing to send an empty message body");
     }
-    if msg.is_empty() {
-        anyhow::bail!("refusing to send an empty message");
+    if wire.len() + 2 > PAYLOAD_SIZE - PAYLOAD_OVERHEAD_SIZE {
+        anyhow::bail!(
+            "encrypted message too large for the 1024-B Sphinx payload ({} B)",
+            wire.len()
+        );
     }
 
     let relays = cfg.relays.path();
     let sphinx_keys = resolve_verified_path(&relays, list)?;
-    transmit_packet(cfg, receiver, msg, proof, &sphinx_keys)
+    transmit_packet(cfg, receiver, wire, proof, &sphinx_keys)
 }
 
 /// Build the 3-hop Sphinx packet with the already-verified sphinx keys and
@@ -155,7 +178,7 @@ pub fn send_packet(
 fn transmit_packet(
     cfg: &Config,
     receiver: &str,
-    msg: &str,
+    wire: &[u8],
     proof: Option<&Token>,
     sphinx_keys: &[PublicKey; PATH_LEN],
 ) -> Result<()> {
@@ -172,18 +195,18 @@ fn transmit_packet(
         .collect();
 
     // The destination *is* the recipient's delivery address; the exit relay
-    // reads it from the FinalHop metadata and pushes the plaintext to it.
+    // reads it from the FinalHop metadata and pushes the ciphertext to it.
     let destination = Destination::new(
         DestinationAddressBytes::from_bytes(net::addr_to_field(receiver)?),
         [0u8; 16], // no mailbox identifier yet (M-later)
     );
     let delays = vec![Delay::new_from_millis(10); PATH_LEN];
 
-    // Payload = [u16 BE len][msg]: length-prefixed so a 0x01 byte inside the
-    // message cannot be confused with the crate's padding marker.
-    let mut payload = Vec::with_capacity(2 + msg.len());
-    payload.extend_from_slice(&(msg.len() as u16).to_be_bytes());
-    payload.extend_from_slice(msg.as_bytes());
+    // Payload = [u16 BE len][wire]: length-prefixed so a 0x01 byte inside
+    // the ciphertext cannot be confused with the crate's padding marker.
+    let mut payload = Vec::with_capacity(2 + wire.len());
+    payload.extend_from_slice(&(wire.len() as u16).to_be_bytes());
+    payload.extend_from_slice(wire);
 
     let packet = SphinxPacket::new(payload, &route, &destination, &delays)?;
 
@@ -257,8 +280,11 @@ pub fn fetch_and_verify_claim(addr: &str) -> Result<RelayClaim> {
     Ok(claim)
 }
 
-/// Receive loop for a client: prints messages delivered by the exit relay.
-pub fn listen(addr: &str) -> Result<String> {
+/// Receive loop for a client: prints messages delivered by the exit relay,
+/// **decrypted** with the Layer-3 Double Ratchet. `home` holds the ratchet
+/// account + sessions (`unlink ratchet-init` must have been run).
+pub fn listen(addr: &str, home: &Path) -> Result<String> {
+    let mut ratchet = RatchetClient::load(home)?;
     let listener = std::net::TcpListener::bind(addr)?;
     println!("unlink listening on {addr} — waiting for delivered messages (Ctrl-C to stop)");
     for stream in listener.incoming() {
@@ -270,9 +296,16 @@ pub fn listen(addr: &str) -> Result<String> {
             }
         };
         match net::recv_frame(&mut stream) {
-            Ok(Some((net::FRAME_DELIVER, body))) => {
-                println!("message: {}", String::from_utf8_lossy(&body));
-            }
+            Ok(Some((net::FRAME_DELIVER, body))) => match ratchet.decrypt(&body) {
+                Ok((sender, pt)) => {
+                    println!(
+                        "message from {}: {}",
+                        &sender[..sender.len().min(16)],
+                        String::from_utf8_lossy(&pt)
+                    );
+                }
+                Err(e) => println!("undecryptable message dropped: {e}"),
+            },
             Ok(Some((ty, _))) => println!("unexpected frame type {ty}"),
             _ => {}
         }
@@ -422,7 +455,7 @@ mod tests {
             peers: Default::default(),
         };
         // The empty-message check runs before any network/list lookup.
-        assert!(send_packet(&cfg, &SignedRelayList::default(), "127.0.0.1:1", "", None).is_err());
+        assert!(send_packet(&cfg, &SignedRelayList::default(), "127.0.0.1:1", &[], None).is_err());
     }
 
     /// A fake relay endpoint serving a claim over the handshake, so the

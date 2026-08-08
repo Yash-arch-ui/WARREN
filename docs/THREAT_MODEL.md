@@ -29,7 +29,8 @@ an entry here.
   single relay learns the full path, the sender, or the plaintext.
 - The **client's local machine** is trusted (no firmware-level attacker).
 - Cryptographic primitives are assumed sound (Sphinx format, ChaCha20,
-  HKDF, x25519, RFC 9474 blind RSA, Double Ratchet in M2).
+  HKDF, x25519, RFC 9474 blind RSA, ed25519, Olm Double Ratchet via
+  `vodozemac` in M3).
 
 ## 2. Adversary capabilities we defend against
 
@@ -85,10 +86,16 @@ reduction; it is the standard mixnet trade-off.
 
 **Capability:** the peer you message can observe your behavior.
 
-**Defense (M2):** the Double Ratchet provides forward secrecy and
-post-compromise security for message *content*. SURBs (single-use reply
-blocks, via `sphinx-packet`'s `surb` module) allow anonymous replies without
-revealing your address.
+**Defense (M3):** the Olm Double Ratchet (via `vodozemac`, verified in
+`docs/LIBRARY_SELECTION.md` §5) provides **forward secrecy** and
+**post-compromise security** (break-in recovery) for message *content*: a
+fresh key per message, erased after use, and a fresh DH keypair per reply.
+Message bodies are encrypted at Layer 3 (`ratchet`) inside the Sphinx
+payload; relays never see plaintext. The property is pinned in
+`ratchet::tests::message_n_plus_one_does_not_decrypt_with_message_n_key`
+and exercised end-to-end in `tests/m4_ratchet.rs`. SURBs (single-use reply
+blocks, via `sphinx-packet`'s `surb` module) for anonymous replies remain
+M5+.
 
 ### E. Poisoned relay list / unauthenticated relay pubkeys (M3)
 
@@ -268,5 +275,5 @@ We use `blind-rsa-signatures` (RFC 9474 / Privacy Pass v1) — see
 - Network-split issuer (issue over the wire, issuer key outside the client's
   data dir) — `Issuer::blind_sign` already takes only `BlindMessage`s, so
   the split is a serialization/transport exercise.
-- SURB-based replies; Double Ratchet content encryption; transport
-  obfuscation; timing mixing (§3.1).
+- SURB-based replies; transport obfuscation; timing mixing (§3.1).
+  (Double Ratchet content encryption is **done** — M3, §2.D.)

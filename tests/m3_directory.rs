@@ -25,8 +25,10 @@ use common::*;
 use unlink::credential::{ClientTokenWallet, Epoch, Issuer};
 use unlink::directory::{SignedRelayList, sign_claim};
 
-/// Write a wallet with `count` tokens into `home` (spend path requirement).
+/// Write a wallet with `count` tokens into `home`, plus a Layer-3 ratchet
+/// identity for the sender (message bodies are Double-Ratchet encrypted).
 fn home_with_wallet(home: &Path, count: usize) {
+    unlink::ratchet::RatchetClient::init(home).unwrap();
     let epoch = Epoch(1);
     let issuer = Issuer::new(epoch).unwrap();
     let mut wallet = ClientTokenWallet::new(epoch, issuer.public_key_pem().unwrap());
@@ -34,10 +36,17 @@ fn home_with_wallet(home: &Path, count: usize) {
     wallet.save(&home.join("wallet.json")).unwrap();
 }
 
-fn cfg_path(tmp: &TempDir, relays: (&str, &str, &str), receiver: &str) -> std::path::PathBuf {
-    let p = tmp.path().join("config.toml");
-    write_config(&p, relays, &[("bob", receiver)]);
-    p
+/// Bob's receiving client (ratchet-decrypting) + the config for the sender.
+fn bob_and_cfg(tmp: &TempDir, relays: (&str, &str, &str)) -> (Receiver, std::path::PathBuf) {
+    let (bob_home, bob_id, bob_otk) = ratchet_init(tmp, "bob");
+    let receiver = Receiver::start(&bob_home);
+    let cfg_path = tmp.path().join("config.toml");
+    write_config(
+        &cfg_path,
+        relays,
+        &[("bob", &receiver.addr, &bob_id, &bob_otk)],
+    );
+    (receiver, cfg_path)
 }
 
 #[test]
@@ -46,12 +55,7 @@ fn valid_signed_list_is_accepted_and_routes_a_message() {
     let entry = RelayProcess::spawn(&["--key", &tmp.path().join("key-entry").to_string_lossy()]);
     let middle = RelayProcess::spawn(&["--key", &tmp.path().join("key-middle").to_string_lossy()]);
     let exit = RelayProcess::spawn(&["--key", &tmp.path().join("key-exit").to_string_lossy()]);
-    let receiver = Receiver::start();
-    let cfg = cfg_path(
-        &tmp,
-        (&entry.addr, &middle.addr, &exit.addr),
-        &receiver.addr,
-    );
+    let (receiver, cfg) = bob_and_cfg(&tmp, (&entry.addr, &middle.addr, &exit.addr));
 
     let home = tmp.path().join("home");
     home_with_wallet(&home, 5);
@@ -76,12 +80,7 @@ fn unsigned_list_entry_is_rejected_before_send() {
     let entry = RelayProcess::spawn(&["--key", &tmp.path().join("key-entry").to_string_lossy()]);
     let middle = RelayProcess::spawn(&["--key", &tmp.path().join("key-middle").to_string_lossy()]);
     let exit = RelayProcess::spawn(&["--key", &tmp.path().join("key-exit").to_string_lossy()]);
-    let receiver = Receiver::start();
-    let cfg = cfg_path(
-        &tmp,
-        (&entry.addr, &middle.addr, &exit.addr),
-        &receiver.addr,
-    );
+    let (receiver, cfg) = bob_and_cfg(&tmp, (&entry.addr, &middle.addr, &exit.addr));
 
     let home = tmp.path().join("home");
     home_with_wallet(&home, 5);
@@ -111,12 +110,7 @@ fn tampered_list_entry_is_rejected_not_silently_accepted() {
     let entry = RelayProcess::spawn(&["--key", &tmp.path().join("key-entry").to_string_lossy()]);
     let middle = RelayProcess::spawn(&["--key", &tmp.path().join("key-middle").to_string_lossy()]);
     let exit = RelayProcess::spawn(&["--key", &tmp.path().join("key-exit").to_string_lossy()]);
-    let receiver = Receiver::start();
-    let cfg = cfg_path(
-        &tmp,
-        (&entry.addr, &middle.addr, &exit.addr),
-        &receiver.addr,
-    );
+    let (receiver, cfg) = bob_and_cfg(&tmp, (&entry.addr, &middle.addr, &exit.addr));
 
     let home = tmp.path().join("home");
     home_with_wallet(&home, 5);
@@ -144,12 +138,7 @@ fn forged_list_entry_rejected_at_handshake_crosscheck() {
     let entry = RelayProcess::spawn(&["--key", &tmp.path().join("key-entry").to_string_lossy()]);
     let middle = RelayProcess::spawn(&["--key", &tmp.path().join("key-middle").to_string_lossy()]);
     let exit = RelayProcess::spawn(&["--key", &tmp.path().join("key-exit").to_string_lossy()]);
-    let receiver = Receiver::start();
-    let cfg = cfg_path(
-        &tmp,
-        (&entry.addr, &middle.addr, &exit.addr),
-        &receiver.addr,
-    );
+    let (receiver, cfg) = bob_and_cfg(&tmp, (&entry.addr, &middle.addr, &exit.addr));
 
     let home = tmp.path().join("home");
     home_with_wallet(&home, 5);

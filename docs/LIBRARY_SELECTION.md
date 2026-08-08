@@ -1,6 +1,6 @@
 # Library selection
 
-Three cryptographic dependencies, chosen with the same evidence standard:
+Four cryptographic dependencies, chosen with the same evidence standard:
 
 1. **§1 — Sphinx mix packets (M0/M1):** [`sphinx-packet`](https://crates.io/crates/sphinx-packet)
    (Nymtech, Apache-2.0, v0.7.0). The project language is therefore **Rust**.
@@ -11,6 +11,10 @@ Three cryptographic dependencies, chosen with the same evidence standard:
    [`ed25519-dalek`](https://crates.io/crates/ed25519-dalek)
    (Dalek team, BSD-3-Clause/Apache-2.0, v2.1) — RFC 8032, the natural
    pairing with the existing `x25519-dalek` keys.
+4. **§5 — Double Ratchet message-body encryption (M3):**
+   [`vodozemac`](https://crates.io/crates/vodozemac) (Matrix, Apache-2.0,
+   v0.10.0) — the Olm Double Ratchet with verified forward secrecy +
+   break-in recovery.
 
 ---
 
@@ -275,3 +279,116 @@ interactive setup and a compact 64-byte signature.
 - **`src/client.rs`**: the client verifies the live handshake claim's
   signature and cross-checks identity + sphinx keys against its verified
   gossip list before building the Sphinx route (spec §8.5).
+
+---
+
+# §5 Double Ratchet message-body encryption
+
+**Decision: reuse [`vodozemac`](https://crates.io/crates/vodozemac)** (the
+Matrix foundation's Olm library), pinned at **`0.10.0`** in `Cargo.toml`.
+This is the reference implementation of the Signal Double Ratchet protocol
+that Matrix uses in production (`matrix-rust-sdk`).
+
+## Why this one
+
+| Attribute       | Value (verified 2026-08-08)                                   |
+|-----------------|----------------------------------------------------------------|
+| Latest version  | `0.10.0`                                                      |
+| Last release    | 2026 (actively maintained)                                    |
+| License         | **Apache-2.0**                                                |
+| Repo            | `github.com/matrix-org/vodozemac` (maintained by the Matrix foundation) |
+| Downloads       | **1M+**                                                        |
+| Production use  | Matrix's `matrix-rust-sdk` end-to-end encryption               |
+| Protocol        | The Signal **Double Ratchet** (Ratcheted DH + symmetric ratchet) |
+| Verified claims | *"Perfect forward secrecy"* **and** *"self-healing"* — i.e. break-in recovery (post-compromise security) |
+
+## The M2-style trap check: forward secrecy + break-in recovery, verified
+
+The brief warns not to assume the label "Double Ratchet" implies the full
+forward-secrecy + break-in-recovery guarantee — the same trap as M2's
+blind-sig check. So this was verified against the **actual crate source**
+(not just the marketing blurb):
+
+- **Forward secrecy** (compromise of the current state does not reveal past
+  message keys): vodozemac's root README states the session uses *"a fresh
+  key for every message and deletes it immediately after use"* — i.e. each
+  message key is derived by a KDF chain step and erased once consumed, so an
+  old ciphertext cannot be decrypted with later state (this is the property
+  our `message_n_plus_one_does_not_decrypt_with_message_n_key` test pins:
+  replaying message N after the ratchet advances fails).
+- **Break-in recovery / post-compromise security** (compromise of current
+  state does not permanently poison future messages): the README's
+  "self-healing" property — *"every reply that the other party sends is
+  encrypted with a fresh key pair"* — is the DH ratchet step: each new
+  message from the peer introduces a fresh ephemeral DH key, so an attacker
+  who compromises the current ratchet state cannot predict future chain keys
+  unless they can also compromise the peer's fresh ephemerals.
+
+Both are structural properties of the Double Ratchet (DH ratchet per message
+on the receiving side, KDF chain per message on the sending side), and they
+are what make Olm a real ratchet rather than a stream cipher with a counter.
+
+## Why not the alternatives (checked with the same rigor)
+
+### `ratchet` (crates.io) — ❌ rejected
+
+**Name-collision trap (like §1's `sphinx`).** The crates.io `ratchet` crate
+is **not** a Double Ratchet implementation at all — it is an unrelated
+**cryptographic PRNG** (a "ChaCha-based random generator" per its README).
+Its docs contain a `DoubleRatchet` name only as a coincidence of
+terminology. Anyone searching "rust double ratchet" can burn hours here.
+
+### `double-ratchet` (Dynisious, crates.io) — ❌ rejected
+
+A spec-conformant `CryptoProvider`-based implementation, but: effectively
+**unmaintained and unproven** (no releases on crates.io beyond an early
+version, no visible downstream users or reviews), and it requires the
+consumer to **implement the `CryptoProvider` trait** (providing HKDF,
+ChaCha20-Poly1305, X25519 wrappers) — which pushes the crypto wiring into
+our code, exactly the hand-rolled-crypto territory this project forbids.
+vodozemac ships a complete, tested implementation with zero glue code.
+
+### `mls-rs` / `openmls` — ❌ rejected
+
+MLS is a **group** messaging protocol (KeyPackages, group state, epoch
+transitions, a Delivery Service). Our spec needs **pairwise** message-body
+encryption between two clients, with a simple two-party session — MLS
+brings an entire group handshake and committee architecture that is wrong
+shaped for a two-party channel and far heavier than needed.
+
+### Hand-rolling a ratchet — ❌ rejected
+
+The project rule (from §1/§2): never implement crypto ourselves.
+
+## How it is used (M3)
+
+- **`src/ratchet.rs`** — `RatchetClient`: a persisted vodozemac `Account`
+  (curve25519 identity + one-time keys) plus per-peer `Session`s, keyed by
+  the peer's identity key hex. `encrypt` opens the outbound session on first
+  use (`create_outbound_session` with the peer's identity + one-time key
+  from config) and produces the first message as a **pre-key message**;
+  `decrypt` establishes the inbound session from a pre-key message
+  (`create_inbound_session`, consuming the matching one-time key) or matches
+  a normal message by trying each stored session on a **clone** and
+  committing only on success (a wrong candidate never mutates state).
+- **Session setup is manual/config'd for M3** (the task's allowance):
+  `unlink ratchet-init` prints the client's identity key + a fresh one-time
+  key; the peer pastes those into its `[peers.<name>]` config entry. The
+  library's own pre-key message flow then *is* the session establishment —
+  no separate X3DH handshake needs to be implemented by us (the task
+  permits this since the chosen library requires it).
+- **Wire format**: the encrypted body is `[u8 message_type][olm message]`
+  inside the Sphinx payload, replacing the M1/M2 plaintext. Relays are
+  unchanged — to them it is opaque payload.
+- **`src/client.rs`** — `send` encrypts the body (Layer 3) before spending a
+  token and wrapping in Sphinx; `listen` decrypts delivered bodies with the
+  matching session.
+
+## Verified forward-secrecy test (code, not vibes)
+
+`ratchet::tests::message_n_plus_one_does_not_decrypt_with_message_n_key`
+encrypts two messages, asserts the wire bytes differ for identical
+plaintext, decrypts both in order, then asserts **replaying either message
+after the ratchet advanced fails** — the exact forward-secrecy property the
+crate claims, pinned in code. `tests/m4_ratchet.rs` additionally drives a
+full bidirectional session over the real 3-hop relay path.

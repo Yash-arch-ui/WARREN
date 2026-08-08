@@ -9,8 +9,8 @@ use unlink::{client, config, credential, relay};
 ///
 /// M1: real 3-hop Sphinx routing over local TCP. M2: blind-signature
 /// admission tokens. M3: signed relay claims + verified gossip list (real
-/// gossip *propagation* is M5+, per spec §5.4). Double Ratchet content
-/// encryption is still out of scope.
+/// gossip *propagation* is M5+, per spec §5.4) and Layer-3 Double Ratchet
+/// message-body encryption (Olm via `vodozemac`).
 #[derive(Parser)]
 #[command(name = "unlink", version, about, arg_required_else_help = true)]
 struct Cli {
@@ -58,10 +58,17 @@ enum Command {
         #[arg(long)]
         home: Option<PathBuf>,
     },
+    /// Print this client's Layer-3 Double Ratchet keys to share with a peer
+    RatchetInit {
+        #[arg(long)]
+        home: Option<PathBuf>,
+    },
     /// Listen for messages delivered to this client
     Listen {
         /// Local address to listen on, e.g. 127.0.0.1:9001
         addr: String,
+        #[arg(long)]
+        home: Option<PathBuf>,
     },
     /// Run as a mix relay node
     Relay {
@@ -132,7 +139,19 @@ fn run(cmd: Command) -> anyhow::Result<String> {
             ))
         }
 
-        Command::Listen { addr } => client::listen(&addr),
+        Command::RatchetInit { home } => {
+            let home = home.unwrap_or_else(config::unlink_home);
+            let (id, otk) = unlink::ratchet::RatchetClient::init(&home)?;
+            Ok(format!(
+                "ratchet identity={id} one_time={otk}\nshare these with your peer and add them \
+                 under [peers.<name>] in their config (id/otk)"
+            ))
+        }
+
+        Command::Listen { addr, home } => {
+            let home = home.unwrap_or_else(config::unlink_home);
+            client::listen(&addr, &home)
+        }
 
         Command::Relay {
             start,

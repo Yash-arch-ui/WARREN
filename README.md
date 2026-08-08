@@ -3,11 +3,12 @@
 A minimal CLI client for a mixnet-routed messenger.
 
 **Current milestone: M3.** Real 3-hop Sphinx routing over local TCP (M1),
-reputation-gated admission with blind-signature tokens (M2), and a signed
+reputation-gated admission with blind-signature tokens (M2), a signed
 relay/gossip list with per-relay self-signed claims verified by the client
-(M3) are implemented and tested. Still out of scope: real gossip
-*propagation* (M5+), a separate directory authority, Double Ratchet content
-encryption, transport obfuscation, timing mixing.
+(M3), and Layer-3 message-body encryption with the Olm Double Ratchet (M3,
+via `vodozemac`) are implemented and tested. Still out of scope: real
+gossip *propagation* (M5+), a separate directory authority, transport
+obfuscation, timing mixing.
 
 ## Why Rust
 
@@ -31,20 +32,29 @@ $ unlink relay --start --port 7003 --key ~/.unlink/r3.key
 
 # Terminal 4: get admission tokens and write the config
 $ unlink token-issue --count 10
+
+# Terminal 5: bob sets up his Layer-3 ratchet identity (prints identity + one-time key)
+$ unlink ratchet-init --home ~/.unlink/bob
+ratchet identity=<bob-id> one_time=<bob-otk>
+
+# Terminal 4: write the config with the relay path and bob's ratchet keys
 $ cat > ~/.unlink/config.toml <<'EOF'
 [relays]
 entry  = "127.0.0.1:7001"
 middle = "127.0.0.1:7002"
 exit   = "127.0.0.1:7003"
-[peers]
-bob = "127.0.0.1:9001"
+
+[peers.bob]
+addr = "127.0.0.1:9001"   # bob's delivery address
+id   = "<bob-id>"          # from bob's `unlink ratchet-init`
+otk  = "<bob-otk>"         # from bob's `unlink ratchet-init`
 EOF
 
 # Terminal 4: build the signed gossip list from the live relays (M3)
 $ unlink directory-fetch 127.0.0.1:7001 127.0.0.1:7002 127.0.0.1:7003
 
 # Terminal 5: bob listens; Terminal 4: send through the mix
-$ unlink listen 127.0.0.1:9001
+$ unlink listen 127.0.0.1:9001 --home ~/.unlink/bob
 $ unlink send bob "hello through three relays"
 ```
 
@@ -64,9 +74,10 @@ rotates its keys.
 | `unlink keygen`                      | x25519 identity keypair (0600 file) |
 | `unlink token-issue [--count N]`     | issue a blind-token batch (M2 dev tool) |
 | `unlink directory-fetch <addr>...`   | assemble a verified signed relay list from live relays (M3) |
-| `unlink send <peer> <msg>`           | spend one token, build a 3-hop Sphinx packet, verify signed list + handshake claims, send via entry relay |
+| `unlink send <peer> <msg>`           | ratchet-encrypt the body, spend one token, build a 3-hop Sphinx packet, verify signed list + handshake claims, send via entry relay |
 | `unlink relay --start --port P`      | mix relay: unwrap-and-forward over TCP; `--admit-key`/`--epoch` enable the M2 gate |
-| `unlink listen <addr:port>`          | receive messages delivered by the exit relay |
+| `unlink ratchet-init [--home]`       | create Layer-3 Olm account; print identity + one-time key to share with a peer (M3) |
+| `unlink listen <addr:port> [--home]` | receive messages delivered by the exit relay, decrypting them with the Layer-3 ratchet |
 
 All file-touching commands take `--home <dir>` (default `$UNLINK_HOME` or
 `~/.unlink`); `send` also takes `--config <path>` and `--relays <path>`
@@ -79,26 +90,29 @@ src/
   main.rs       # clap CLI dispatch
   lib.rs        # module map
   client.rs     # keygen, path fetch, Sphinx packet build, send+proof, listen
+  ratchet.rs    # Layer-3 Olm Double Ratchet: account + per-peer sessions (M3)
   relay.rs      # unwrap-and-forward loop + admission gate + signed identity claim
   directory.rs  # signed relay claims + gossip list verify (M3)
   credential.rs # blind-signature tokens: issuer / wallet / relay admission
   net.rs        # plain-TCP framing (transport obfuscation is M-later)
-  config.rs     # client TOML config (relay path + peers)
+  config.rs     # client TOML config (relay path + peers, incl. Layer-3 keys)
 tests/
   cli_smoke.rs        # CLI-level smoke tests
   m1_routing.rs       # 3 real relays: delivery + no relay sees sender & receiver
   m2_admission.rs     # valid / replay / out-of-tokens / unlinkability over the wire
   m3_directory.rs     # signed list: valid routing + unsigned/tampered/forged rejection
+  m4_ratchet.rs       # full bidirectional Double Ratchet session over the real path
 docs/
-  LIBRARY_SELECTION.md  # sphinx-packet (§1) + blind-rsa-signatures (§2) + ed25519 (§4)
+  LIBRARY_SELECTION.md  # sphinx-packet (§1) + blind-rsa-signatures (§2) + ed25519 (§4) + vodozemac (§5)
   THREAT_MODEL.md       # adversary model, credential guarantees, MVP non-goals
+  LATENCY.md            # raw end-to-end latency measurements (M3)
 .github/workflows/ci.yml # fmt + clippy + test
 ```
 
 ## Test
 
 ```console
-$ cargo test          # crypto units, CLI smoke, 3-hop + admission + directory integration
+$ cargo test          # crypto units, CLI smoke, routing + admission + directory + ratchet integration
 $ cargo clippy --all-targets -- -D warnings
 ```
 
@@ -107,8 +121,9 @@ $ cargo clippy --all-targets -- -D warnings
 Read [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) first. Headline: Sphinx
 defends against passive observers and single malicious relays (verified in
 code, not assumed); blind tokens gate admission with unlinkable redemptions;
-**global timing correlation is explicitly NOT solved** (spec §9) and remains
-out of MVP scope.
+the Olm Double Ratchet protects message content with forward secrecy and
+break-in recovery (M3); **global timing correlation is explicitly NOT
+solved** (spec §9) and remains out of MVP scope.
 
 ## License
 

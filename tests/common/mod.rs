@@ -150,27 +150,33 @@ impl Drop for RelayProcess {
     }
 }
 
-/// The "destination client": a TCP listener that collects delivered messages.
+/// The "destination client": a TCP listener that collects delivered
+/// messages, **decrypting each with the Layer-3 Double Ratchet** (the
+/// receiver half of a real `unlink listen`). `home` must have been
+/// `ratchet-init`'d and hold the account whose one-time key the sender used.
 pub struct Receiver {
     pub addr: String,
     received: Arc<Mutex<Vec<String>>>,
 }
 
 impl Receiver {
-    pub fn start() -> Self {
+    pub fn start(home: &Path) -> Self {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let addr = listener.local_addr().unwrap().to_string();
         let received = Arc::new(Mutex::new(Vec::new()));
         let rx = received.clone();
+        let home = home.to_path_buf();
         std::thread::spawn(move || {
+            let mut ratchet = unlink::ratchet::RatchetClient::load(&home).unwrap();
             for stream in listener.incoming() {
                 let Ok(mut s) = stream else { continue };
                 if let Ok(Some((unlink::net::FRAME_DELIVER, body))) =
                     unlink::net::recv_frame(&mut s)
+                    && let Ok((_sender, pt)) = ratchet.decrypt(&body)
                 {
                     rx.lock()
                         .unwrap()
-                        .push(String::from_utf8_lossy(&body).into_owned());
+                        .push(String::from_utf8_lossy(&pt).into_owned());
                 }
             }
         });
@@ -201,16 +207,31 @@ impl Receiver {
     }
 }
 
-/// Write a client config TOML.
-pub fn write_config(path: &Path, relays: (&str, &str, &str), peers: &[(&str, &str)]) {
+/// Write a client config TOML. Each peer is a `[peers.<label>]` table with
+/// its delivery address + Layer-3 ratchet keys (id/otk).
+pub fn write_config(
+    path: &Path,
+    relays: (&str, &str, &str),
+    peers: &[(&str, &str, &str, &str)], // (label, addr, id, otk)
+) {
     let mut s = format!(
-        "[relays]\nentry = \"{}\"\nmiddle = \"{}\"\nexit = \"{}\"\n\n[peers]\n",
+        "[relays]\nentry = \"{}\"\nmiddle = \"{}\"\nexit = \"{}\"\n",
         relays.0, relays.1, relays.2
     );
-    for (k, v) in peers {
-        s.push_str(&format!("{k} = \"{v}\"\n"));
+    for (label, addr, id, otk) in peers {
+        s.push_str(&format!(
+            "\n[peers.{label}]\naddr = \"{addr}\"\nid = \"{id}\"\notk = \"{otk}\"\n"
+        ));
     }
     std::fs::write(path, s).unwrap();
+}
+
+/// Initialize a Layer-3 ratchet identity (the receiver side) and return
+/// `(home, id_hex, otk_hex)` to hand to the sender's config.
+pub fn ratchet_init(tmp: &TempDir, tag: &str) -> (PathBuf, String, String) {
+    let home = tmp.path().join(tag);
+    let (id, otk) = unlink::ratchet::RatchetClient::init(&home).unwrap();
+    (home, id, otk)
 }
 
 /// Write a signed gossip list from relay claims (the client's trust anchor).
