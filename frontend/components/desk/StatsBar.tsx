@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useReducedMotion } from "framer-motion";
+import { IS_MOCK } from "@/lib/config";
 import { useDeskModel } from "@/lib/desk/model";
 
 /**
@@ -124,9 +125,6 @@ export default function StatsBar() {
 
   return (
     <div
-      role="group"
-      aria-label="Surveillance desk statistics"
-      className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6"
       style={{
         backgroundColor: "var(--bg-card)",
         border: "1px solid var(--border-subtle)",
@@ -134,6 +132,35 @@ export default function StatsBar() {
         overflow: "hidden",
       }}
     >
+      {/* Mock mode renders bundled fixtures, not a live wallet — say so on
+          the numbers themselves, or a hosted demo reads as broken state. */}
+      {IS_MOCK ? (
+        <div
+          className="flex items-center justify-between px-5 pt-2.5 pb-1.5"
+          style={{ borderBottom: "1px solid var(--hairline)" }}
+        >
+          <span
+            className="font-mono text-[10px] uppercase tracking-[0.18em]"
+            style={{ color: "var(--text-muted)" }}
+          >
+            Demo fixtures
+          </span>
+          <span
+            className="font-mono text-[10px] uppercase tracking-[0.18em] rounded-[var(--r-chip)] border px-2 py-0.5"
+            style={{
+              color: "var(--verdict-escalate)",
+              borderColor: "var(--verdict-escalate)",
+            }}
+          >
+            not a live wallet
+          </span>
+        </div>
+      ) : null}
+      <div
+        role="group"
+        aria-label="Surveillance desk statistics"
+        className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6"
+      >
       {tiles.map((tile, i) => (
         <div
           key={tile.label}
@@ -171,6 +198,7 @@ export default function StatsBar() {
           </span>
         </div>
       ))}
+      </div>
     </div>
   );
 }
