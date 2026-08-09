@@ -5,7 +5,7 @@
 > Track: Censorship Resistance
 
 ---
-
+URL : warren-oukh.vercel.app
 ## The Problem
 
 Signal and apps like it encrypt *what* you say. They do this well — nobody can read your messages in transit. But the servers running those apps still see *who you're contacting and when*, even though they can't read the content. That connection graph alone — not the message, just the metadata — is enough to identify an activist, a journalist's source, or a whistleblower. And because these apps run through one company's infrastructure, that metadata sits at a single point that can be subpoenaed, seized, or blocked outright, regardless of how good the encryption is.
